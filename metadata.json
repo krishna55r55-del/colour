@@ -1,0 +1,6 @@
+{
+  "name": "COBCLUB — Premium Virtual Gaming Platform",
+  "description": "Experience COBCLUB: a high-octane, mobile-first online gaming platform with 10 interactive games, virtual points, sleek visuals, and instant action.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
