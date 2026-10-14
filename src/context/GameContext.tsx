@@ -28,6 +28,10 @@ interface GameContextType {
   placeBet: (amount: number) => boolean;
   refundBet: (amount: number) => void;
   recordGameResult: (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => void;
+  deposit: (amount: number) => void;
+  winManagerEnabled: boolean;
+  toggleWinManager: () => void;
+  setWinManagerEnabled: (enabled: boolean) => void;
   resetBalance: () => void;
   clearHistory: () => void;
   playSound: (type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss') => void;
@@ -40,6 +44,7 @@ const STORAGE_KEY_RECENT = 'cobclub_recent_games_v1';
 const STORAGE_KEY_SOUND = 'cobclub_sound_pref_v1';
 const STORAGE_KEY_AUTH = 'cobclub_auth_user_v1';
 const STORAGE_KEY_ACCOUNTS = 'cobclub_registered_accounts_v1';
+const STORAGE_KEY_WIN_MANAGER = 'cobclub_win_manager_v1';
 
 const INITIAL_BALANCE = 1000;
 
@@ -139,6 +144,22 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [activeView, setActiveView] = useState<ViewType>('home');
   const [selectedGameId, setSelectedGameId] = useState<GameId | null>(null);
+
+  // Win Manager state: ON = all bets win, OFF = all bets lose (or lowest bet wins if all options bet)
+  const [winManagerEnabled, setWinManagerEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_WIN_MANAGER);
+      return saved !== null ? saved === 'true' : false;
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_WIN_MANAGER, winManagerEnabled ? 'true' : 'false');
+    } catch {}
+  }, [winManagerEnabled]);
 
   // Sync state to local storage
   useEffect(() => {
@@ -363,6 +384,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     playSound('win');
   };
 
+  const deposit = (amount: number) => {
+    if (amount <= 0) return;
+    setBalance((prev) => prev + amount);
+    playSound('jackpot');
+  };
+
+  const toggleWinManager = () => {
+    setWinManagerEnabled((prev) => !prev);
+    playSound('click');
+  };
+
   const clearHistory = () => {
     setHistory([]);
     try {
@@ -390,6 +422,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         selectGame,
         placeBet,
         refundBet,
+        deposit,
+        winManagerEnabled,
+        toggleWinManager,
+        setWinManagerEnabled,
         recordGameResult,
         resetBalance,
         clearHistory,

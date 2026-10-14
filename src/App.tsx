@@ -10,6 +10,7 @@ import { HomeView } from './components/views/HomeView';
 import { AllGamesView } from './components/views/AllGamesView';
 import { HistoryView } from './components/views/HistoryView';
 import { ProfileView } from './components/views/ProfileView';
+import { DepositView } from './components/views/DepositView';
 
 // 10 Playable Games
 import { ColorPredictionGame } from './components/games/ColorPredictionGame';
@@ -80,18 +81,20 @@ const AppContent: React.FC = () => {
         return <HistoryView />;
       case 'profile':
         return <ProfileView />;
+      case 'deposit':
+        return <DepositView />;
       default:
         return <HomeView />;
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#f4f5f8] text-slate-800 flex flex-col font-sans selection:bg-rose-500 selection:text-white">
+    <div className="min-h-screen bg-[#f4f5f8] text-slate-800 flex flex-col font-sans selection:bg-rose-500 selection:text-white overflow-x-hidden w-full max-w-full">
       {/* Top Navigation */}
       <Navbar />
 
       {/* Main Content Area */}
-      <main className="flex-1 w-full pb-20 md:pb-8">
+      <main className="flex-1 w-full max-w-full overflow-x-hidden pb-20 md:pb-8">
         {renderView()}
       </main>
 

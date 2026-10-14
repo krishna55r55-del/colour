@@ -1,0 +1,131 @@
+/**
+ * Win Management logic for COBCLUB gaming platform
+ *
+ * Rules:
+ * 1. When Win Manager is ON:
+ *    - All player bets win. If conflicting bets placed, maximizes user winnings.
+ * 2. When Win Manager is OFF:
+ *    - All player bets lose.
+ *    - If player placed bets covering all options (impossible for all to lose),
+ *      the outcome with the lowest bet amount (the lower bet) will win while
+ *      higher bets lose.
+ */
+
+export interface BetOrderEval {
+  target: 'green' | 'red' | 'purple' | 'big' | 'small' | number;
+  amount: number;
+  label?: string;
+}
+
+export const calculateBetPayout = (
+  target: BetOrderEval['target'],
+  amount: number,
+  outcomeNumber: number
+): number => {
+  if (typeof target === 'number') {
+    return target === outcomeNumber ? amount * 9 : 0;
+  }
+  if (target === 'green') {
+    if (outcomeNumber === 5) return Math.round(amount * 1.5);
+    if ([1, 3, 7, 9].includes(outcomeNumber)) return amount * 2;
+    return 0;
+  }
+  if (target === 'red') {
+    if (outcomeNumber === 0) return Math.round(amount * 1.5);
+    if ([2, 4, 6, 8].includes(outcomeNumber)) return amount * 2;
+    return 0;
+  }
+  if (target === 'purple') {
+    if (outcomeNumber === 0 || outcomeNumber === 5) return Math.round(amount * 4.5);
+    return 0;
+  }
+  if (target === 'big') {
+    return outcomeNumber >= 5 ? amount * 2 : 0;
+  }
+  if (target === 'small') {
+    return outcomeNumber <= 4 ? amount * 2 : 0;
+  }
+  return 0;
+};
+
+export const determineWinGoOutcome = (
+  bets: BetOrderEval[],
+  winManagerEnabled: boolean
+): number => {
+  const allNumbers = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+  // Natural draw if no active bets
+  if (!bets || bets.length === 0) {
+    return Math.floor(Math.random() * 10);
+  }
+
+  // Pre-calculate evaluation for all 10 possible outcome numbers
+  const candidateStats = allNumbers.map((num) => {
+    let totalPayout = 0;
+    let winningBetsCount = 0;
+    let totalWinningWager = 0;
+
+    bets.forEach((b) => {
+      const payout = calculateBetPayout(b.target, b.amount, num);
+      if (payout > 0) {
+        totalPayout += payout;
+        winningBetsCount += 1;
+        totalWinningWager += b.amount;
+      }
+    });
+
+    return {
+      num,
+      totalPayout,
+      winningBetsCount,
+      totalWinningWager,
+      allWon: winningBetsCount === bets.length,
+      allLost: winningBetsCount === 0,
+    };
+  });
+
+  // 1. Win Manager is ON: All bets will win
+  if (winManagerEnabled) {
+    const allWonCandidates = candidateStats.filter((c) => c.allWon);
+    if (allWonCandidates.length > 0) {
+      const picked = allWonCandidates[Math.floor(Math.random() * allWonCandidates.length)];
+      return picked.num;
+    }
+
+    // In case of conflicting bets (e.g., bet on Red and Green simultaneously),
+    // pick the outcome that maximizes winning bets and payout
+    const sorted = [...candidateStats].sort((a, b) => {
+      if (b.winningBetsCount !== a.winningBetsCount) {
+        return b.winningBetsCount - a.winningBetsCount;
+      }
+      return b.totalPayout - a.totalPayout;
+    });
+
+    return sorted[0].num;
+  }
+
+  // 2. Win Manager is OFF:
+  // "when the button is off the all bet will loss and if a person bet ob all option the lower bet will win"
+
+  // Check if there are outcomes where ALL user bets lose (0 payout)
+  const zeroPayoutCandidates = candidateStats.filter((c) => c.allLost);
+  if (zeroPayoutCandidates.length > 0) {
+    const picked = zeroPayoutCandidates[Math.floor(Math.random() * zeroPayoutCandidates.length)];
+    return picked.num;
+  }
+
+  // If player bet on all options so no 0-payout number exists:
+  // Pick the outcome with the LOWEST winning bet amount (the lower bet wins!)
+  const nonZeroCandidates = [...candidateStats].filter((c) => c.totalPayout > 0);
+  nonZeroCandidates.sort((a, b) => {
+    if (a.totalWinningWager !== b.totalWinningWager) {
+      return a.totalWinningWager - b.totalWinningWager;
+    }
+    return a.totalPayout - b.totalPayout;
+  });
+
+  const minWager = nonZeroCandidates[0].totalWinningWager;
+  const lowestCandidates = nonZeroCandidates.filter((c) => c.totalWinningWager === minWager);
+  const picked = lowestCandidates[Math.floor(Math.random() * lowestCandidates.length)];
+  return picked.num;
+};

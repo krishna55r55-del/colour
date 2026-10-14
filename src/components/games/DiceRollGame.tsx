@@ -10,7 +10,7 @@ type TwoDiceChoice = 'under7' | 'exact7' | 'over7' | 'doubles';
 type OneDiceChoice = 'under4' | 'over3' | 'even' | 'odd';
 
 export const DiceRollGame: React.FC = () => {
-  const { placeBet, recordGameResult, playSound } = useGame();
+  const { placeBet, recordGameResult, playSound, winManagerEnabled } = useGame();
 
   const [mode, setMode] = useState<DiceMode>('two');
   const [betAmount, setBetAmount] = useState(50);
@@ -79,8 +79,47 @@ export const DiceRollGame: React.FC = () => {
 
     setTimeout(() => {
       clearInterval(interval);
-      const final1 = Math.floor(Math.random() * 6) + 1;
-      const final2 = Math.floor(Math.random() * 6) + 1;
+      let final1 = Math.floor(Math.random() * 6) + 1;
+      let final2 = Math.floor(Math.random() * 6) + 1;
+
+      if (winManagerEnabled) {
+        // Force win
+        if (mode === 'two') {
+          if (twoChoice === 'under7') {
+            final1 = 2; final2 = 3; // sum 5
+          } else if (twoChoice === 'exact7') {
+            final1 = 3; final2 = 4; // sum 7
+          } else if (twoChoice === 'over7') {
+            final1 = 5; final2 = 4; // sum 9
+          } else if (twoChoice === 'doubles') {
+            final1 = 4; final2 = 4;
+          }
+        } else {
+          if (oneChoice === 'under4') final1 = 2;
+          else if (oneChoice === 'over3') final1 = 5;
+          else if (oneChoice === 'even') final1 = 4;
+          else if (oneChoice === 'odd') final1 = 3;
+        }
+      } else {
+        // Force loss (all bet will loss)
+        if (mode === 'two') {
+          if (twoChoice === 'under7') {
+            final1 = 5; final2 = 4; // sum 9 >= 7
+          } else if (twoChoice === 'exact7') {
+            final1 = 2; final2 = 3; // sum 5 !== 7
+          } else if (twoChoice === 'over7') {
+            final1 = 2; final2 = 3; // sum 5 <= 7
+          } else if (twoChoice === 'doubles') {
+            final1 = 2; final2 = 5; // not doubles
+          }
+        } else {
+          if (oneChoice === 'under4') final1 = 5;
+          else if (oneChoice === 'over3') final1 = 2;
+          else if (oneChoice === 'even') final1 = 3;
+          else if (oneChoice === 'odd') final1 = 4;
+        }
+      }
+
       setDie1(final1);
       setDie2(final2);
       setIsRolling(false);

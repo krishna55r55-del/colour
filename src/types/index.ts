@@ -58,4 +58,4 @@ export interface UserProfile {
   registeredAt: number;
 }
 
-export type ViewType = 'home' | 'all-games' | 'history' | 'profile' | 'game';
+export type ViewType = 'home' | 'all-games' | 'history' | 'profile' | 'game' | 'deposit';

@@ -8,7 +8,7 @@ import { WinModal } from '../common/WinModal';
 type CoinSide = 'heads' | 'tails';
 
 export const CoinFlipGame: React.FC = () => {
-  const { placeBet, recordGameResult, playSound } = useGame();
+  const { placeBet, recordGameResult, playSound, winManagerEnabled } = useGame();
 
   const [betAmount, setBetAmount] = useState(50);
   const [selectedSide, setSelectedSide] = useState<CoinSide>('heads');
@@ -47,7 +47,9 @@ export const CoinFlipGame: React.FC = () => {
     setTimeout(() => playSound('tick'), 600);
 
     setTimeout(() => {
-      const outcome: CoinSide = Math.random() > 0.5 ? 'heads' : 'tails';
+      const outcome: CoinSide = winManagerEnabled
+        ? selectedSide
+        : (selectedSide === 'heads' ? 'tails' : 'heads');
       setCoinResult(outcome);
       setIsFlipping(false);
       setRecentFlips((prev) => [outcome, ...prev.slice(0, 9)]);

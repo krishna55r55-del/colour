@@ -98,7 +98,7 @@ export const HistoryView: React.FC = () => {
 
         <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
           <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-            Net Virtual Return
+            Net Return
           </span>
           <div className={`text-xl sm:text-2xl font-black font-mono mt-1 tabular-nums flex items-center gap-1 ${
             netBalance >= 0 ? 'text-emerald-600' : 'text-slate-600'

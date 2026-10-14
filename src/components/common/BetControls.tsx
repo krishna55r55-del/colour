@@ -149,7 +149,7 @@ export const BetControls: React.FC<BetControlsProps> = ({
 
       {isInsufficient && (
         <p className="text-[11px] text-rose-600 font-semibold mt-2 text-center">
-          Insufficient virtual balance. Please reduce bet or claim free points.
+          Insufficient balance. Please reduce bet or deposit funds.
         </p>
       )}
     </div>

@@ -15,7 +15,7 @@ interface CardData {
 }
 
 export const DragonTigerGame: React.FC = () => {
-  const { placeBet, recordGameResult, playSound } = useGame();
+  const { placeBet, recordGameResult, playSound, winManagerEnabled } = useGame();
 
   const [betAmount, setBetAmount] = useState(50);
   const [selectedBet, setSelectedBet] = useState<BetOption>('dragon');
@@ -65,8 +65,42 @@ export const DragonTigerGame: React.FC = () => {
     }, 400);
 
     setTimeout(() => {
-      const dCard = getRandomCard();
-      const tCard = getRandomCard();
+      let dCard = getRandomCard();
+      let tCard = getRandomCard();
+
+      if (winManagerEnabled) {
+        // Win Manager ON: player bet wins
+        if (selectedBet === 'dragon') {
+          while (dCard.rank <= tCard.rank) {
+            dCard = getRandomCard();
+            tCard = getRandomCard();
+          }
+        } else if (selectedBet === 'tiger') {
+          while (tCard.rank <= dCard.rank) {
+            dCard = getRandomCard();
+            tCard = getRandomCard();
+          }
+        } else if (selectedBet === 'tie') {
+          tCard = { ...dCard, suit: '♥' };
+        }
+      } else {
+        // Win Manager OFF: player bet loses
+        if (selectedBet === 'dragon') {
+          while (tCard.rank <= dCard.rank) {
+            dCard = getRandomCard();
+            tCard = getRandomCard();
+          }
+        } else if (selectedBet === 'tiger') {
+          while (dCard.rank <= tCard.rank) {
+            dCard = getRandomCard();
+            tCard = getRandomCard();
+          }
+        } else if (selectedBet === 'tie') {
+          while (dCard.rank === tCard.rank) {
+            tCard = getRandomCard();
+          }
+        }
+      }
 
       setDragonCard(dCard);
       setTigerCard(tCard);

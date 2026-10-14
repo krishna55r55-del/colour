@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { WinModal } from '../common/WinModal';
+import { determineWinGoOutcome } from '../../utils/winLogic';
 
 type WinGoDuration = 30 | 60 | 180 | 300;
 type BetTargetType = 'green' | 'purple' | 'red' | 'big' | 'small' | number;
@@ -100,7 +101,10 @@ const createInitialHistory = (duration: WinGoDuration): PeriodHistory[] => {
 };
 
 export const ColorPredictionGame: React.FC = () => {
-  const { balance, placeBet, recordGameResult, playSound, resetBalance, selectGame } = useGame();
+  const { balance, placeBet, recordGameResult, playSound, resetBalance, selectGame, setActiveView, winManagerEnabled } = useGame();
+
+  const winManagerEnabledRef = useRef(winManagerEnabled);
+  winManagerEnabledRef.current = winManagerEnabled;
 
   // Mode selection: 30s, 1Min, 3Min, 5Min
   const [selectedDuration, setSelectedDuration] = useState<WinGoDuration>(30);
@@ -213,7 +217,13 @@ export const ColorPredictionGame: React.FC = () => {
 
   // Resolve Round logic for a specific section duration (30s, 1Min, 3Min, 5Min)
   const resolveRound = (dur: WinGoDuration) => {
-    const drawnNumber = Math.floor(Math.random() * 10);
+    // Evaluate active bets for this section
+    const betsToEvaluate = activeBetsByDurationRef.current[dur] || [];
+
+    // Outcome selection governed by Win Manager:
+    // When ON: all player bets win
+    // When OFF: all bets lose (or lowest bet wins if all options bet)
+    const drawnNumber = determineWinGoOutcome(betsToEvaluate, winManagerEnabledRef.current);
     const bigSmall: 'Big' | 'Small' = drawnNumber >= 5 ? 'Big' : 'Small';
 
     let colorType: 'green' | 'red' | 'purple_red' | 'purple_green';
@@ -237,8 +247,6 @@ export const ColorPredictionGame: React.FC = () => {
       [dur]: [periodRecord, ...(prev[dur] || []).slice(0, 19)],
     }));
 
-    // Evaluate active bets for this section
-    const betsToEvaluate = activeBetsByDurationRef.current[dur] || [];
     if (betsToEvaluate.length > 0) {
       let totalBet = 0;
       let totalPayout = 0;
@@ -615,10 +623,10 @@ export const ColorPredictionGame: React.FC = () => {
             type="button"
             onClick={() => {
               playSound('click');
-              resetBalance();
-              alert('Deposit successful: ₹1,000 added to your wallet.');
+              selectGame(null);
+              setActiveView('deposit');
             }}
-            className="py-2.5 px-4 rounded-full bg-white hover:bg-slate-100 text-[#e52e2e] font-black text-xs uppercase tracking-wider shadow-md transition-all active:scale-98 text-center"
+            className="py-2.5 px-4 rounded-full bg-white hover:bg-slate-100 text-[#e52e2e] font-black text-xs uppercase tracking-wider shadow-md transition-all active:scale-98 text-center cursor-pointer"
           >
             Deposit
           </button>
@@ -934,7 +942,8 @@ export const ColorPredictionGame: React.FC = () => {
                   {historyList.map((item, i) => (
                     <tr key={i} className="hover:bg-slate-50 transition-colors">
                       <td className="py-2.5 px-2 font-mono text-slate-700 font-medium">
-                        {item.period}
+                        <span className="sm:hidden font-bold">#{item.period.slice(-4)}</span>
+                        <span className="hidden sm:inline">{item.period}</span>
                       </td>
                       <td className="py-2.5 px-2 text-center">
                         <div className="inline-block">{renderBall(item.number, 'sm')}</div>

@@ -34,11 +34,11 @@ export const Footer: React.FC<FooterProps> = ({ onOpenLegal }) => {
               </span>
             </div>
             <p className="text-slate-500 text-xs leading-relaxed">
-              Play. Predict. Match. Enjoy. The definitive official virtual gaming platform powered exclusively by virtual fun credits.
+              Play. Predict. Match. Enjoy. The definitive official online lottery & prediction gaming platform.
             </p>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 border border-rose-200 text-[11px] text-rose-700 font-bold">
               <ShieldCheck className="w-3.5 h-3.5 text-rose-600" />
-              <span>100% Free Virtual Points</span>
+              <span>Verified & Secure Gaming Platform</span>
             </div>
           </div>
 

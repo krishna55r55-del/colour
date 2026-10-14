@@ -346,7 +346,7 @@ export const AuthPage: React.FC = () => {
                     className="w-4 h-4 rounded-sm border-slate-300 text-rose-600 focus:ring-0 mt-0.5"
                   />
                   <span>
-                    I agree to the <strong className="text-slate-800">Terms of Use</strong> and acknowledge this platform operates purely with 100% free virtual points.
+                    I agree to the <strong className="text-slate-800">Terms of Use</strong> and acknowledge platform guidelines.
                   </span>
                 </label>
               </div>
@@ -372,7 +372,7 @@ export const AuthPage: React.FC = () => {
           {/* Platform Guarantee */}
           <div className="pt-3 border-t border-slate-100 flex items-center justify-center gap-2 text-[11px] text-slate-500">
             <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            <span>100% Free Virtual Points · Zero Real Money Risk</span>
+            <span>Instant Settlements · 24/7 Secure Platform</span>
           </div>
         </div>
       </div>

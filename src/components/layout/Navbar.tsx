@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Sparkles, Coins, Volume2, VolumeX, Menu, X, Plus, LogOut, User } from 'lucide-react';
+import { Sparkles, Volume2, VolumeX, Menu, X, LogOut, User } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { ViewType } from '../../types';
 
 export const Navbar: React.FC = () => {
-  const { balance, activeView, setActiveView, selectGame, soundEnabled, toggleSound, playSound, user, logout } = useGame();
+  const { activeView, setActiveView, selectGame, soundEnabled, toggleSound, playSound, user, logout } = useGame();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleNav = (view: ViewType) => {
@@ -92,18 +92,7 @@ export const Navbar: React.FC = () => {
             {soundEnabled ? <Volume2 className="w-4 h-4 text-rose-500" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
           </button>
 
-          {/* Virtual Balance Pill */}
-          <div className="flex items-center bg-rose-50 border border-rose-200 rounded-full px-3 py-1.5 shadow-xs">
-            <button
-              type="button"
-              onClick={() => handleNav('profile')}
-              className="flex items-center gap-1.5 text-xs font-black text-rose-600 hover:text-rose-700 transition-colors"
-              title="Click to view points wallet"
-            >
-              <Coins className="w-4 h-4 text-amber-500 shrink-0" />
-              <span className="tabular-nums font-mono">{balance.toLocaleString()}</span>
-            </button>
-          </div>
+
 
           {/* User Sign Out button */}
           {user && (
