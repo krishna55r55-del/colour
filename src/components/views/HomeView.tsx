@@ -170,49 +170,6 @@ export const HomeView: React.FC = () => {
             </div>
           </div>
         </div>
-
-        {/* Floating Quick Balance Bar (White card with red wallet accent) */}
-        <div className="mt-6 max-w-xl mx-auto p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200/90 shadow-md flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600 shadow-xs shrink-0">
-              <Coins className="w-5 h-5 sm:w-6 sm:h-6" />
-            </div>
-            <div className="min-w-0">
-              <span className="text-[10px] sm:text-[11px] text-slate-500 uppercase tracking-wider font-extrabold block truncate">
-                Balance
-              </span>
-              <span className="text-lg sm:text-2xl font-black text-slate-900 font-mono tabular-nums truncate block">
-                ₹{balance.toLocaleString()}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                playSound('click');
-                setActiveView('deposit');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-full bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white text-xs font-black transition-all shadow-xs flex items-center gap-1 cursor-pointer"
-            >
-              <span>Deposit</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                playSound('click');
-                setActiveView('profile');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-full bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 text-white text-xs font-black transition-all shadow-xs flex items-center gap-1 cursor-pointer"
-            >
-              <span>Wallet</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
       </section>
 
       {/* Featured Games Spotlight */}

@@ -1,6 +1,29 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { GameId, GameHistoryItem, UserStats, ViewType, UserProfile } from '../types';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import {
+  GameId,
+  GameHistoryItem,
+  UserStats,
+  ViewType,
+  UserProfile,
+  BankAccountDetails,
+  WithdrawRecord,
+  DepositRecord,
+  SupabaseSyncStatus,
+} from '../types';
 import { soundManager } from '../utils/audio';
+import {
+  syncUserProfile,
+  updateWalletBalanceInSupabase,
+  recordBetInSupabase,
+  fetchBetHistoryFromSupabase,
+  recordDepositInSupabase,
+  fetchDepositsFromSupabase,
+  recordWithdrawalInSupabase,
+  fetchWithdrawalsFromSupabase,
+  saveBankDetailsToSupabase,
+  fetchBankDetailsFromSupabase,
+  testSupabaseConnection,
+} from '../lib/supabase';
 
 interface StoredAccount {
   phoneNumber: string;
@@ -19,6 +42,11 @@ interface GameContextType {
   selectedGameId: GameId | null;
   user: UserProfile | null;
   isAuthenticated: boolean;
+  savedBankDetails: BankAccountDetails | null;
+  withdrawRecords: WithdrawRecord[];
+  depositRecords: DepositRecord[];
+  supabaseStatus: SupabaseSyncStatus;
+  refreshFromSupabase: () => Promise<void>;
   login: (phoneNumber: string, password: string) => { success: boolean; error?: string };
   register: (phoneNumber: string, password: string, confirmPassword: string) => { success: boolean; error?: string };
   logout: () => void;
@@ -28,7 +56,9 @@ interface GameContextType {
   placeBet: (amount: number) => boolean;
   refundBet: (amount: number) => void;
   recordGameResult: (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => void;
-  deposit: (amount: number) => void;
+  deposit: (amount: number, bonus?: number, method?: string) => DepositRecord;
+  saveBankDetails: (details: BankAccountDetails) => void;
+  submitWithdrawal: (amount: number, details: BankAccountDetails) => { success: boolean; error?: string; record?: WithdrawRecord };
   winManagerEnabled: boolean;
   toggleWinManager: () => void;
   setWinManagerEnabled: (enabled: boolean) => void;
@@ -37,14 +67,15 @@ interface GameContextType {
   playSound: (type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss') => void;
 }
 
-const STORAGE_KEY_BALANCE = 'cobclub_virtual_balance_v1';
-const STORAGE_KEY_HISTORY = 'cobclub_game_history_v1';
-const STORAGE_KEY_STATS = 'cobclub_user_stats_v1';
-const STORAGE_KEY_RECENT = 'cobclub_recent_games_v1';
-const STORAGE_KEY_SOUND = 'cobclub_sound_pref_v1';
+// Global storage keys
 const STORAGE_KEY_AUTH = 'cobclub_auth_user_v1';
 const STORAGE_KEY_ACCOUNTS = 'cobclub_registered_accounts_v1';
 const STORAGE_KEY_WIN_MANAGER = 'cobclub_win_manager_v1';
+const STORAGE_KEY_SOUND = 'cobclub_sound_pref_v1';
+const STORAGE_KEY_RECENT = 'cobclub_recent_games_v1';
+
+// User-scoped storage key helper
+const getUserKey = (phone: string, key: string) => `cobclub_${key}_${phone}`;
 
 const INITIAL_BALANCE = 1000;
 
@@ -78,16 +109,7 @@ const defaultUserProfile: UserProfile = {
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Authentication state - Default authenticated for immediate full website preview
-  const [user, setUser] = useState<UserProfile | null>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_AUTH);
-      return saved ? JSON.parse(saved) : defaultUserProfile;
-    } catch {
-      return defaultUserProfile;
-    }
-  });
-
+  // Registered accounts database
   const [accounts, setAccounts] = useState<StoredAccount[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
@@ -97,32 +119,68 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
-  const [balance, setBalance] = useState<number>(() => {
+  // Current logged in user
+  const [user, setUser] = useState<UserProfile | null>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY_BALANCE);
-      return saved !== null ? Math.max(0, parseInt(saved, 10)) : INITIAL_BALANCE;
+      const saved = localStorage.getItem(STORAGE_KEY_AUTH);
+      return saved ? JSON.parse(saved) : defaultUserProfile;
     } catch {
-      return INITIAL_BALANCE;
+      return defaultUserProfile;
     }
   });
 
-  const [history, setHistory] = useState<GameHistoryItem[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_HISTORY);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
+  // Helper to load user-specific initial data
+  const loadUserInitialData = (phone: string | undefined) => {
+    if (!phone) {
+      return {
+        balance: INITIAL_BALANCE,
+        history: [],
+        stats: defaultStats,
+        bank: null,
+        withdraws: [],
+        deposits: [],
+      };
     }
-  });
+    try {
+      const savedBal = localStorage.getItem(getUserKey(phone, 'balance'));
+      const balance = savedBal !== null ? Math.max(0, parseInt(savedBal, 10)) : INITIAL_BALANCE;
 
-  const [stats, setStats] = useState<UserStats>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_STATS);
-      return saved ? JSON.parse(saved) : defaultStats;
+      const savedHist = localStorage.getItem(getUserKey(phone, 'history'));
+      const history = savedHist ? JSON.parse(savedHist) : [];
+
+      const savedSt = localStorage.getItem(getUserKey(phone, 'stats'));
+      const stats = savedSt ? JSON.parse(savedSt) : defaultStats;
+
+      const savedB = localStorage.getItem(getUserKey(phone, 'bank'));
+      const bank = savedB ? JSON.parse(savedB) : null;
+
+      const savedW = localStorage.getItem(getUserKey(phone, 'withdraws'));
+      const withdraws = savedW ? JSON.parse(savedW) : [];
+
+      const savedD = localStorage.getItem(getUserKey(phone, 'deposits'));
+      const deposits = savedD ? JSON.parse(savedD) : [];
+
+      return { balance, history, stats, bank, withdraws, deposits };
     } catch {
-      return defaultStats;
+      return {
+        balance: INITIAL_BALANCE,
+        history: [],
+        stats: defaultStats,
+        bank: null,
+        withdraws: [],
+        deposits: [],
+      };
     }
-  });
+  };
+
+  const initialData = loadUserInitialData(user?.phoneNumber);
+
+  const [balance, setBalance] = useState<number>(initialData.balance);
+  const [history, setHistory] = useState<GameHistoryItem[]>(initialData.history);
+  const [stats, setStats] = useState<UserStats>(initialData.stats);
+  const [savedBankDetails, setSavedBankDetails] = useState<BankAccountDetails | null>(initialData.bank);
+  const [withdrawRecords, setWithdrawRecords] = useState<WithdrawRecord[]>(initialData.withdraws);
+  const [depositRecords, setDepositRecords] = useState<DepositRecord[]>(initialData.deposits);
 
   const [recentlyPlayed, setRecentlyPlayed] = useState<GameId[]>(() => {
     try {
@@ -161,16 +219,243 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
   }, [winManagerEnabled]);
 
-  // Sync state to local storage
-  useEffect(() => {
+  // Supabase live connection state
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseSyncStatus>({
+    connected: true,
+    tablesReady: false,
+    projectRef: 'ijjzajfgdlpzbvxmypya',
+    missingTables: [],
+    lastSyncedAt: null,
+  });
+
+  const userRef = useRef(user);
+  userRef.current = user;
+
+  const balanceRef = useRef(balance);
+  balanceRef.current = balance;
+
+  // Sync Supabase data for the currently active logged-in user
+  const performSupabaseSync = async () => {
+    const currentUser = userRef.current;
     try {
-      if (user) {
-        localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(user));
+      const health = await testSupabaseConnection();
+      setSupabaseStatus({
+        connected: health.connected,
+        tablesReady: health.tablesReady,
+        projectRef: health.projectRef,
+        missingTables: health.missingTables,
+        lastSyncedAt: Date.now(),
+      });
+
+      if (!currentUser) return;
+      const phone = currentUser.phoneNumber;
+      const memberId = currentUser.memberId;
+
+      // 1. Sync wallet balance with profiles table for this account
+      const profileSync = await syncUserProfile(memberId, phone, balanceRef.current);
+      if (profileSync.isSynced && profileSync.balance !== balanceRef.current) {
+        setBalance(profileRes => {
+          try {
+            localStorage.setItem(getUserKey(phone, 'balance'), profileSync.balance.toString());
+          } catch {}
+          return profileSync.balance;
+        });
+      }
+
+      // 2. Sync bet history for this account
+      const cloudBets = await fetchBetHistoryFromSupabase(memberId, phone);
+      if (cloudBets && cloudBets.length > 0) {
+        setHistory(cloudBets);
+        try {
+          localStorage.setItem(getUserKey(phone, 'history'), JSON.stringify(cloudBets.slice(0, 60)));
+        } catch {}
+
+        // Calculate and sync stats from history
+        const totalRounds = cloudBets.length;
+        const totalWins = cloudBets.filter((b) => b.isWin).length;
+        const totalLosses = totalRounds - totalWins;
+        const totalWagered = cloudBets.reduce((acc, b) => acc + b.betAmount, 0);
+        const totalWon = cloudBets.reduce((acc, b) => acc + b.payout, 0);
+        const biggestWin = Math.max(0, ...cloudBets.map((b) => b.payout));
+        const newStats: UserStats = {
+          totalRounds,
+          totalWins,
+          totalLosses,
+          totalWagered,
+          totalWon,
+          biggestWin,
+          currentStreak: 0,
+          bestStreak: 0,
+          favoriteGameId: cloudBets[0]?.gameId || null,
+        };
+        setStats(newStats);
+        try {
+          localStorage.setItem(getUserKey(phone, 'stats'), JSON.stringify(newStats));
+        } catch {}
+      }
+
+      // 3. Sync deposit records for this account
+      const cloudDeposits = await fetchDepositsFromSupabase(memberId, phone);
+      if (cloudDeposits && cloudDeposits.length > 0) {
+        const mappedDeposits: DepositRecord[] = cloudDeposits.map((d) => ({
+          id: d.id,
+          amount: d.amount,
+          bonus: d.bonus,
+          totalCredit: d.total_credit,
+          method: d.method,
+          timestamp: d.created_at ? new Date(d.created_at).getTime() : Date.now(),
+          status: d.status,
+        }));
+        setDepositRecords(mappedDeposits);
+        try {
+          localStorage.setItem(getUserKey(phone, 'deposits'), JSON.stringify(mappedDeposits));
+        } catch {}
+      }
+
+      // 4. Sync withdrawal records for this account
+      const cloudWithdrawals = await fetchWithdrawalsFromSupabase(memberId, phone);
+      if (cloudWithdrawals && cloudWithdrawals.length > 0) {
+        setWithdrawRecords(cloudWithdrawals);
+        try {
+          localStorage.setItem(getUserKey(phone, 'withdraws'), JSON.stringify(cloudWithdrawals));
+        } catch {}
+      }
+
+      // 5. Sync bank account details for this account
+      const cloudBank = await fetchBankDetailsFromSupabase(memberId, phone);
+      if (cloudBank) {
+        setSavedBankDetails(cloudBank);
+        try {
+          localStorage.setItem(getUserKey(phone, 'bank'), JSON.stringify(cloudBank));
+        } catch {}
+      }
+    } catch (e) {
+      console.warn('Supabase sync warning:', e);
+    }
+  };
+
+  // Switch to account data when user logs in or registers
+  const switchAccount = async (targetUser: UserProfile, isNewReg: boolean = false) => {
+    const phone = targetUser.phoneNumber;
+    const memberId = targetUser.memberId;
+
+    let accBalance = INITIAL_BALANCE;
+    let accHistory: GameHistoryItem[] = [];
+    let accStats: UserStats = defaultStats;
+    let accBank: BankAccountDetails | null = null;
+    let accWithdraws: WithdrawRecord[] = [];
+    let accDeposits: DepositRecord[] = [];
+
+    if (!isNewReg) {
+      try {
+        const savedBal = localStorage.getItem(getUserKey(phone, 'balance'));
+        if (savedBal !== null) accBalance = Math.max(0, parseInt(savedBal, 10));
+
+        const savedHist = localStorage.getItem(getUserKey(phone, 'history'));
+        if (savedHist) accHistory = JSON.parse(savedHist);
+
+        const savedSt = localStorage.getItem(getUserKey(phone, 'stats'));
+        if (savedSt) accStats = JSON.parse(savedSt);
+
+        const savedB = localStorage.getItem(getUserKey(phone, 'bank'));
+        if (savedB) accBank = JSON.parse(savedB);
+
+        const savedW = localStorage.getItem(getUserKey(phone, 'withdraws'));
+        if (savedW) accWithdraws = JSON.parse(savedW);
+
+        const savedD = localStorage.getItem(getUserKey(phone, 'deposits'));
+        if (savedD) accDeposits = JSON.parse(savedD);
+      } catch {}
+    } else {
+      // Initialize brand new account storage
+      try {
+        localStorage.setItem(getUserKey(phone, 'balance'), INITIAL_BALANCE.toString());
+        localStorage.setItem(getUserKey(phone, 'history'), '[]');
+        localStorage.setItem(getUserKey(phone, 'stats'), JSON.stringify(defaultStats));
+        localStorage.setItem(getUserKey(phone, 'withdraws'), '[]');
+        localStorage.setItem(getUserKey(phone, 'deposits'), '[]');
+        localStorage.removeItem(getUserKey(phone, 'bank'));
+      } catch {}
+    }
+
+    // Set user state
+    setUser(targetUser);
+    setBalance(accBalance);
+    setHistory(accHistory);
+    setStats(accStats);
+    setSavedBankDetails(accBank);
+    setWithdrawRecords(accWithdraws);
+    setDepositRecords(accDeposits);
+
+    // Save auth session
+    try {
+      localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(targetUser));
+    } catch {}
+
+    // Trigger Supabase fetch for this user
+    userRef.current = targetUser;
+    balanceRef.current = accBalance;
+    await performSupabaseSync();
+  };
+
+  useEffect(() => {
+    if (user?.phoneNumber) {
+      performSupabaseSync();
+    }
+  }, [user?.phoneNumber]);
+
+  // Persist user-scoped data whenever state updates
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      localStorage.setItem(getUserKey(phone, 'balance'), balance.toString());
+    } catch {}
+  }, [balance, user?.phoneNumber]);
+
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      localStorage.setItem(getUserKey(phone, 'history'), JSON.stringify(history.slice(0, 60)));
+    } catch {}
+  }, [history, user?.phoneNumber]);
+
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      localStorage.setItem(getUserKey(phone, 'stats'), JSON.stringify(stats));
+    } catch {}
+  }, [stats, user?.phoneNumber]);
+
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      localStorage.setItem(getUserKey(phone, 'withdraws'), JSON.stringify(withdrawRecords.slice(0, 30)));
+    } catch {}
+  }, [withdrawRecords, user?.phoneNumber]);
+
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      localStorage.setItem(getUserKey(phone, 'deposits'), JSON.stringify(depositRecords.slice(0, 30)));
+    } catch {}
+  }, [depositRecords, user?.phoneNumber]);
+
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      if (savedBankDetails) {
+        localStorage.setItem(getUserKey(phone, 'bank'), JSON.stringify(savedBankDetails));
       } else {
-        localStorage.removeItem(STORAGE_KEY_AUTH);
+        localStorage.removeItem(getUserKey(phone, 'bank'));
       }
     } catch {}
-  }, [user]);
+  }, [savedBankDetails, user?.phoneNumber]);
 
   useEffect(() => {
     try {
@@ -180,109 +465,85 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY_BALANCE, balance.toString());
-    } catch {}
-  }, [balance]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(history.slice(0, 50)));
-    } catch {}
-  }, [history]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(stats));
-    } catch {}
-  }, [stats]);
-
-  useEffect(() => {
-    try {
       localStorage.setItem(STORAGE_KEY_RECENT, JSON.stringify(recentlyPlayed));
     } catch {}
   }, [recentlyPlayed]);
 
   useEffect(() => {
-    soundManager.setEnabled(soundEnabled);
     try {
-      localStorage.setItem(STORAGE_KEY_SOUND, soundEnabled ? 'true' : 'false');
+      localStorage.setItem(STORAGE_KEY_SOUND, soundEnabled.toString());
     } catch {}
   }, [soundEnabled]);
+
+  const playSound = (type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss') => {
+    if (soundEnabled) {
+      soundManager.play(type);
+    }
+  };
 
   const toggleSound = () => {
     const next = !soundEnabled;
     setSoundEnabled(next);
-    soundManager.setEnabled(next);
-    if (next) soundManager.playClick();
-  };
-
-  const playSound = (type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss') => {
-    if (!soundEnabled) return;
-    switch (type) {
-      case 'click': soundManager.playClick(); break;
-      case 'bet': soundManager.playBet(); break;
-      case 'tick': soundManager.playTick(); break;
-      case 'card': soundManager.playCardFlip(); break;
-      case 'flip': soundManager.playCardFlip(); break;
-      case 'win': soundManager.playWin(); break;
-      case 'jackpot': soundManager.playJackpot(); break;
-      case 'loss': soundManager.playLoss(); break;
+    if (next) {
+      soundManager.play('click');
     }
   };
 
-  // Sign In handler
   const login = (phoneNumber: string, password: string): { success: boolean; error?: string } => {
-    const cleanNumber = phoneNumber.trim().replace(/\D/g, '');
-    if (!cleanNumber || cleanNumber.length < 6) {
-      return { success: false, error: 'Please enter a valid phone number (at least 6 digits).' };
+    const cleanedPhone = phoneNumber.trim().replace(/\D/g, '');
+    if (cleanedPhone.length < 10) {
+      return { success: false, error: 'Please enter a valid 10-digit mobile number' };
     }
-    if (!password || password.length < 4) {
-      return { success: false, error: 'Please enter your password.' };
+    if (!password) {
+      return { success: false, error: 'Password is required' };
     }
 
-    const matched = accounts.find((acc) => acc.phoneNumber === cleanNumber);
+    const matched = accounts.find((a) => a.phoneNumber === cleanedPhone);
     if (!matched) {
-      return { success: false, error: 'Account not found. Please click Register to create your account.' };
-    }
-    if (matched.passwordHash !== password) {
-      return { success: false, error: 'Incorrect password. Please verify and try again.' };
+      return { success: false, error: 'No account found with this phone number. Please register.' };
     }
 
-    const profile: UserProfile = {
+    if (matched.passwordHash !== password) {
+      return { success: false, error: 'Incorrect password. Please try again.' };
+    }
+
+    const userProfile: UserProfile = {
       phoneNumber: matched.phoneNumber,
       memberId: matched.memberId,
       registeredAt: matched.registeredAt,
     };
-    setUser(profile);
+
+    // Load and switch to this account's isolated data
+    switchAccount(userProfile, false);
     playSound('win');
     return { success: true };
   };
 
-  // Register handler
   const register = (
     phoneNumber: string,
     password: string,
     confirmPassword: string
   ): { success: boolean; error?: string } => {
-    const cleanNumber = phoneNumber.trim().replace(/\D/g, '');
-    if (!cleanNumber || cleanNumber.length < 6) {
-      return { success: false, error: 'Please enter a valid phone number (at least 6 digits).' };
+    const cleanedPhone = phoneNumber.trim().replace(/\D/g, '');
+    if (cleanedPhone.length < 10) {
+      return { success: false, error: 'Please enter a valid 10-digit mobile number' };
     }
-    if (!password || password.length < 6) {
-      return { success: false, error: 'Password must be at least 6 characters long.' };
+    if (password.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters long' };
     }
     if (password !== confirmPassword) {
-      return { success: false, error: 'Passwords do not match. Please verify both passwords.' };
+      return { success: false, error: 'Passwords do not match' };
     }
 
-    const exists = accounts.some((acc) => acc.phoneNumber === cleanNumber);
+    const exists = accounts.find((a) => a.phoneNumber === cleanedPhone);
     if (exists) {
-      return { success: false, error: 'An account with this phone number already exists. Please Sign In.' };
+      return { success: false, error: 'An account with this phone number already exists' };
     }
 
-    const newMemberId = 'COB' + Math.floor(1000 + Math.random() * 9000);
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const newMemberId = `COB${randomSuffix}`;
     const newAccount: StoredAccount = {
-      phoneNumber: cleanNumber,
+      phoneNumber: cleanedPhone,
       passwordHash: password,
       memberId: newMemberId,
       registeredAt: Date.now(),
@@ -290,30 +551,35 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setAccounts((prev) => [...prev, newAccount]);
 
-    const profile: UserProfile = {
-      phoneNumber: cleanNumber,
+    const userProfile: UserProfile = {
+      phoneNumber: cleanedPhone,
       memberId: newMemberId,
       registeredAt: Date.now(),
     };
-    setUser(profile);
 
-    // Initialize starting balance for new user
-    setBalance(INITIAL_BALANCE);
+    // Initialize fresh account state & sync to Supabase
+    switchAccount(userProfile, true);
     playSound('jackpot');
+
+    // Create profile in Supabase
+    updateWalletBalanceInSupabase(newMemberId, cleanedPhone, INITIAL_BALANCE);
+
     return { success: true };
   };
 
   const logout = () => {
-    setUser(null);
-    setSelectedGameId(null);
-    setActiveView('home');
     playSound('click');
+    setUser(null);
+    try {
+      localStorage.removeItem(STORAGE_KEY_AUTH);
+    } catch {}
+    setActiveView('home');
+    setSelectedGameId(null);
   };
 
   const selectGame = (id: GameId | null) => {
     setSelectedGameId(id);
     if (id) {
-      setActiveView('game');
       setRecentlyPlayed((prev) => {
         const filtered = prev.filter((g) => g !== id);
         return [id, ...filtered].slice(0, 5);
@@ -326,13 +592,23 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (amount <= 0 || balance < amount) {
       return false;
     }
-    setBalance((prev) => prev - amount);
+    const nextBalance = balance - amount;
+    setBalance(nextBalance);
     playSound('bet');
+
+    // Sync updated balance to Supabase and user storage
+    if (user) {
+      updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
+    }
     return true;
   };
 
   const refundBet = (amount: number) => {
-    setBalance((prev) => prev + amount);
+    const nextBalance = balance + amount;
+    setBalance(nextBalance);
+    if (user) {
+      updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
+    }
   };
 
   const recordGameResult = (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => {
@@ -342,8 +618,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       timestamp: Date.now(),
     };
 
+    let nextBalance = balance;
     if (fullItem.payout > 0) {
-      setBalance((prev) => prev + fullItem.payout);
+      nextBalance = balance + fullItem.payout;
+      setBalance(nextBalance);
     }
 
     if (fullItem.isWin) {
@@ -377,17 +655,57 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         favoriteGameId: fullItem.gameId,
       };
     });
+
+    // Persist to user account in Supabase
+    if (user) {
+      recordBetInSupabase(fullItem, user.memberId, user.phoneNumber);
+      updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
+    }
   };
 
   const resetBalance = () => {
     setBalance(INITIAL_BALANCE);
     playSound('win');
+    if (user) {
+      updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, INITIAL_BALANCE);
+    }
   };
 
-  const deposit = (amount: number) => {
-    if (amount <= 0) return;
-    setBalance((prev) => prev + amount);
+  const deposit = (amount: number, bonus: number = 0, method: string = 'UPI Instant'): DepositRecord => {
+    const totalCredit = amount + bonus;
+    const nextBalance = balance + totalCredit;
+    setBalance(nextBalance);
     playSound('jackpot');
+
+    const txnId = 'DEP' + Math.floor(1000000 + Math.random() * 9000000);
+    const newRecord: DepositRecord = {
+      id: txnId,
+      amount,
+      bonus,
+      totalCredit,
+      method: method.toUpperCase(),
+      timestamp: Date.now(),
+      status: 'Completed',
+    };
+
+    setDepositRecords((prev) => [newRecord, ...prev]);
+
+    // Persist to user account in Supabase
+    if (user) {
+      updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
+      recordDepositInSupabase({
+        id: txnId,
+        memberId: user.memberId,
+        phoneNumber: user.phoneNumber,
+        amount,
+        bonus,
+        totalCredit,
+        method,
+        status: 'Completed',
+      });
+    }
+
+    return newRecord;
   };
 
   const toggleWinManager = () => {
@@ -397,9 +715,83 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const clearHistory = () => {
     setHistory([]);
-    try {
-      localStorage.removeItem(STORAGE_KEY_HISTORY);
-    } catch {}
+    if (user) {
+      try {
+        localStorage.setItem(getUserKey(user.phoneNumber, 'history'), '[]');
+      } catch {}
+    }
+  };
+
+  const saveBankDetails = (details: BankAccountDetails) => {
+    setSavedBankDetails(details);
+    playSound('click');
+
+    // Persist to user account in Supabase
+    if (user) {
+      saveBankDetailsToSupabase(details, user.memberId, user.phoneNumber);
+    }
+  };
+
+  const submitWithdrawal = (
+    amount: number,
+    details: BankAccountDetails
+  ): { success: boolean; error?: string; record?: WithdrawRecord } => {
+    if (amount < 200) {
+      return { success: false, error: 'Minimum withdrawal amount is ₹200.' };
+    }
+    if (amount > 50000) {
+      return { success: false, error: 'Maximum single withdrawal limit is ₹50,000.' };
+    }
+    if (balance < amount) {
+      return { success: false, error: 'Insufficient wallet balance for this withdrawal.' };
+    }
+    if (!details.accountHolderName.trim()) {
+      return { success: false, error: 'Please enter account holder name as per bank records.' };
+    }
+    if (!details.bankName.trim()) {
+      return { success: false, error: 'Please select or enter bank name.' };
+    }
+    if (!details.accountNumber.trim() || details.accountNumber.trim().length < 9) {
+      return { success: false, error: 'Please enter a valid bank account number (at least 9 digits).' };
+    }
+    if (!details.ifscCode.trim() || details.ifscCode.trim().length < 8) {
+      return { success: false, error: 'Please enter a valid IFSC code (e.g. SBIN0001234).' };
+    }
+
+    const nextBalance = balance - amount;
+    setBalance(nextBalance);
+    saveBankDetails(details);
+
+    const record: WithdrawRecord = {
+      id: 'WTH' + Math.floor(1000000 + Math.random() * 9000000),
+      amount,
+      actualAmount: amount,
+      fee: 0,
+      bankName: details.bankName,
+      accountNumberMasked: '**** ' + details.accountNumber.slice(-4),
+      accountHolderName: details.accountHolderName,
+      timestamp: Date.now(),
+      status: 'Processing',
+    };
+
+    setWithdrawRecords((prev) => [record, ...prev]);
+    playSound('jackpot');
+
+    // Persist to user account in Supabase
+    if (user) {
+      updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
+      recordWithdrawalInSupabase(record, user.memberId, user.phoneNumber);
+      saveBankDetailsToSupabase(details, user.memberId, user.phoneNumber);
+    }
+
+    // Simulate bank transfer completion after 8 seconds
+    setTimeout(() => {
+      setWithdrawRecords((prev) =>
+        prev.map((r) => (r.id === record.id ? { ...r, status: 'Completed' } : r))
+      );
+    }, 8000);
+
+    return { success: true, record };
   };
 
   return (
@@ -414,6 +806,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         selectedGameId,
         user,
         isAuthenticated: !!user,
+        savedBankDetails,
+        withdrawRecords,
+        depositRecords,
+        supabaseStatus,
+        refreshFromSupabase: performSupabaseSync,
         login,
         register,
         logout,
@@ -423,6 +820,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         placeBet,
         refundBet,
         deposit,
+        saveBankDetails,
+        submitWithdrawal,
         winManagerEnabled,
         toggleWinManager,
         setWinManagerEnabled,

@@ -27,7 +27,7 @@ interface DepositRecord {
 }
 
 export const DepositView: React.FC = () => {
-  const { balance, user, deposit, playSound, setActiveView, selectGame } = useGame();
+  const { balance, user, deposit, depositRecords, playSound, setActiveView, selectGame } = useGame();
 
   const [selectedMethod, setSelectedMethod] = useState<'upi' | 'paytm' | 'bank' | 'usdt'>('upi');
   const [selectedAmount, setSelectedAmount] = useState<number>(1000);
@@ -45,25 +45,6 @@ export const DepositView: React.FC = () => {
     bonus: 0,
     txnId: '',
   });
-
-  const [depositRecords, setDepositRecords] = useState<DepositRecord[]>([
-    {
-      id: 'DEP8829104',
-      amount: 1000,
-      bonus: 50,
-      method: 'UPI Instant',
-      date: 'Today, ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      status: 'Completed',
-    },
-    {
-      id: 'DEP7749182',
-      amount: 500,
-      bonus: 10,
-      method: 'Paytm QR',
-      date: 'Yesterday, 14:22',
-      status: 'Completed',
-    },
-  ]);
 
   const presetAmounts = [
     { amount: 100, bonusPercent: 0 },
@@ -111,29 +92,16 @@ export const DepositView: React.FC = () => {
     setIsProcessing(true);
 
     setTimeout(() => {
-      deposit(totalCredited);
+      const record = deposit(currentAmountNum, bonusAmount, selectedMethod.toUpperCase());
       setIsProcessing(false);
-      const txnId = 'DEP' + Math.floor(1000000 + Math.random() * 9000000);
-
-      setDepositRecords((prev) => [
-        {
-          id: txnId,
-          amount: currentAmountNum,
-          bonus: bonusAmount,
-          method: selectedMethod.toUpperCase(),
-          date: 'Just now',
-          status: 'Completed',
-        },
-        ...prev,
-      ]);
 
       setSuccessModal({
         isOpen: true,
-        amount: currentAmountNum,
-        bonus: bonusAmount,
-        txnId,
+        amount: record.amount,
+        bonus: record.bonus,
+        txnId: record.id,
       });
-    }, 900);
+    }, 800);
   };
 
   return (
@@ -396,7 +364,9 @@ export const DepositView: React.FC = () => {
             >
               <div>
                 <div className="font-bold text-slate-800 font-mono">{rec.id}</div>
-                <div className="text-[11px] text-slate-400">{rec.method} · {rec.date}</div>
+                <div className="text-[11px] text-slate-400">
+                  {rec.method} · {new Date(rec.timestamp).toLocaleDateString()} {new Date(rec.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
               </div>
               <div className="text-right">
                 <div className="font-black text-slate-900 font-mono text-sm">

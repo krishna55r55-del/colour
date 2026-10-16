@@ -58,4 +58,43 @@ export interface UserProfile {
   registeredAt: number;
 }
 
-export type ViewType = 'home' | 'all-games' | 'history' | 'profile' | 'game' | 'deposit';
+export interface BankAccountDetails {
+  accountHolderName: string;
+  bankName: string;
+  accountNumber: string;
+  ifscCode: string;
+  upiId?: string;
+  phoneNumber?: string;
+}
+
+export interface WithdrawRecord {
+  id: string;
+  amount: number;
+  actualAmount: number;
+  fee: number;
+  bankName: string;
+  accountNumberMasked: string;
+  accountHolderName: string;
+  timestamp: number;
+  status: 'Completed' | 'Processing';
+}
+
+export interface DepositRecord {
+  id: string;
+  amount: number;
+  bonus: number;
+  totalCredit: number;
+  method: string;
+  timestamp: number;
+  status: 'Completed' | 'Pending';
+}
+
+export interface SupabaseSyncStatus {
+  connected: boolean;
+  tablesReady: boolean;
+  projectRef: string;
+  missingTables: string[];
+  lastSyncedAt: number | null;
+}
+
+export type ViewType = 'home' | 'all-games' | 'history' | 'profile' | 'game' | 'deposit' | 'withdraw';

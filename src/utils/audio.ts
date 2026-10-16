@@ -15,6 +15,26 @@ class SoundFX {
     return this.enabled;
   }
 
+  public play(type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss') {
+    switch (type) {
+      case 'click':
+        return this.playClick();
+      case 'bet':
+        return this.playBet();
+      case 'tick':
+        return this.playTick();
+      case 'card':
+      case 'flip':
+        return this.playCardFlip();
+      case 'win':
+        return this.playWin();
+      case 'jackpot':
+        return this.playJackpot();
+      case 'loss':
+        return this.playLoss();
+    }
+  }
+
   private initContext() {
     if (!this.ctx && typeof window !== 'undefined') {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;

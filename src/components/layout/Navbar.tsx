@@ -151,35 +151,55 @@ export const Navbar: React.FC = () => {
           </button>
           <button
             type="button"
-            onClick={() => handleNav('profile')}
-            className={`w-full text-left py-2 px-3 rounded-xl text-sm font-semibold ${
-              activeView === 'profile' ? 'bg-purple-950/60 text-purple-300' : 'text-slate-300 hover:bg-slate-900'
+            onClick={() => handleNav('deposit')}
+            className={`w-full text-left py-2.5 px-3 rounded-xl text-sm font-bold flex items-center justify-between ${
+              activeView === 'deposit' ? 'bg-rose-50 text-rose-600' : 'text-slate-700 hover:bg-slate-50'
             }`}
           >
-            Profile & Stats
+            <span>Deposit</span>
+            <span className="text-[10px] bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full font-extrabold">Instant</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleNav('withdraw')}
+            className={`w-full text-left py-2.5 px-3 rounded-xl text-sm font-bold flex items-center justify-between ${
+              activeView === 'withdraw' ? 'bg-amber-50 text-amber-700' : 'text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            <span>Withdrawal (Bank Payouts)</span>
+            <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-extrabold">0% Fee</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleNav('profile')}
+            className={`w-full text-left py-2.5 px-3 rounded-xl text-sm font-bold ${
+              activeView === 'profile' ? 'bg-rose-50 text-rose-600' : 'text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            Profile & Bank Details
           </button>
 
-          <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-xs text-slate-400">
-            <span>Audio Sounds</span>
+          <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-xs text-slate-500">
+            <span>Audio Sound Effects</span>
             <button
               type="button"
               onClick={toggleSound}
-              className="text-cyan-400 font-semibold"
+              className="text-rose-600 font-bold cursor-pointer"
             >
               {soundEnabled ? 'Enabled' : 'Muted'}
             </button>
           </div>
 
           {user && (
-            <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-xs">
-              <span className="text-slate-400 font-mono">ID: {user.memberId} (+91 {user.phoneNumber})</span>
+            <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-xs">
+              <span className="text-slate-500 font-mono">ID: {user.memberId} (+91 {user.phoneNumber})</span>
               <button
                 type="button"
                 onClick={() => {
                   setMobileMenuOpen(false);
                   logout();
                 }}
-                className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 cursor-pointer"
+                className="text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 cursor-pointer"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span>Sign Out</span>
