@@ -4,6 +4,7 @@ import { Navbar } from './components/layout/Navbar';
 import { MobileNav } from './components/layout/MobileNav';
 import { Footer } from './components/layout/Footer';
 import { LegalModals, LegalModalType } from './components/common/LegalModals';
+import { DailyBonusModal } from './components/common/DailyBonusModal';
 
 // Views
 import { HomeView } from './components/views/HomeView';
@@ -109,6 +110,7 @@ const AppContent: React.FC = () => {
 
       {/* Modals */}
       <LegalModals modal={legalModal} onClose={() => setLegalModal(null)} />
+      <DailyBonusModal />
     </div>
   );
 };

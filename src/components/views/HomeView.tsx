@@ -20,7 +20,16 @@ import { ALL_GAMES } from '../../data/games';
 import { GameId, GameMetadata } from '../../types';
 
 export const HomeView: React.FC = () => {
-  const { balance, selectGame, setActiveView, recentlyPlayed, playSound } = useGame();
+  const {
+    balance,
+    selectGame,
+    setActiveView,
+    recentlyPlayed,
+    playSound,
+    dailyBonus,
+    canClaimDailyBonus,
+    setIsDailyBonusModalOpen,
+  } = useGame();
 
   const featuredGames = ALL_GAMES.filter((g) => g.featured);
 
@@ -168,6 +177,75 @@ export const HomeView: React.FC = () => {
                 All 10 Games
               </button>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 24-Hour Daily Login Bonus Banner */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div
+          onClick={() => {
+            playSound('click');
+            setIsDailyBonusModalOpen(true);
+          }}
+          className={`cursor-pointer rounded-2xl p-4 sm:p-5 border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs hover:shadow-md ${
+            canClaimDailyBonus
+              ? 'bg-gradient-to-r from-amber-50 via-rose-50 to-orange-50 border-amber-300 ring-1 ring-amber-300/60'
+              : 'bg-white border-slate-200 hover:border-slate-300'
+          }`}
+        >
+          <div className="flex items-center gap-3.5">
+            <div
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
+                canClaimDailyBonus
+                  ? 'bg-gradient-to-tr from-amber-500 to-rose-500 text-white animate-pulse'
+                  : 'bg-slate-100 text-slate-500'
+              }`}
+            >
+              <Gift className="w-6 h-6" />
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                    canClaimDailyBonus
+                      ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                      : 'bg-emerald-100 text-emerald-800'
+                  }`}
+                >
+                  {canClaimDailyBonus ? 'Bonus Available' : 'Claimed Today'}
+                </span>
+                <span className="text-xs font-bold text-slate-500">
+                  {dailyBonus.streak > 0 ? `Day ${dailyBonus.streak} of 7 Streak` : '7-Day Streak Ladder'}
+                </span>
+              </div>
+
+              <h3 className="text-sm sm:text-base font-black font-display text-slate-900 mt-0.5">
+                {canClaimDailyBonus
+                  ? 'Daily Login Bonus Ready to Claim!'
+                  : 'Daily Bonus Active · Check In Tomorrow'}
+              </h3>
+              <p className="text-xs text-slate-500">
+                {canClaimDailyBonus
+                  ? 'Earn free virtual points every 24 hours to fuel your gaming.'
+                  : `Next bonus point unlock available in 24 hours. Total claimed: ₹${(dailyBonus.totalClaimed || 0).toLocaleString()}`}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-end sm:self-auto shrink-0">
+            <button
+              type="button"
+              className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-xs cursor-pointer ${
+                canClaimDailyBonus
+                  ? 'bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <span>{canClaimDailyBonus ? 'Claim Points' : 'View Calendar'}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </section>

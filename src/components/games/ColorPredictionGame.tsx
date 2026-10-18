@@ -16,10 +16,12 @@ import {
   ArrowLeft,
   ShieldCheck,
   Award,
+  Trophy,
+  Frown,
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { WinModal } from '../common/WinModal';
-import { determineWinGoOutcome } from '../../utils/winLogic';
+import { determineWinGoOutcome, getDeterministicNumberForRound } from '../../utils/winLogic';
 
 type WinGoDuration = 30 | 60 | 180 | 300;
 type BetTargetType = 'green' | 'purple' | 'red' | 'big' | 'small' | number;
@@ -69,39 +71,53 @@ const getContinuousRemainingSeconds = (durationSec: number): number => {
   return rem === 0 ? durationSec : rem;
 };
 
-// Completely distinct outcome history generator for each section
-const createInitialHistory = (duration: WinGoDuration): PeriodHistory[] => {
-  const seedNumbers: Record<WinGoDuration, number[]> = {
-    30: [7, 2, 8, 4, 1, 9, 3, 0, 6, 5, 8, 1, 4, 7, 2], // 30s unique numbers
-    60: [3, 9, 0, 5, 8, 2, 4, 7, 1, 6, 3, 9, 0, 5, 8], // 1 min unique numbers
-    180: [8, 1, 6, 2, 9, 4, 5, 3, 0, 7, 8, 2, 6, 1, 9], // 3 min unique numbers
-    300: [4, 7, 3, 8, 1, 5, 9, 2, 6, 0, 4, 7, 3, 8, 1], // 5 min unique numbers
-  };
-
-  const nums = seedNumbers[duration];
+// Continuous deterministic history generator: produces identical continuous records
+// across all users and devices whether the site is open, closed, or refreshed
+const createContinuousHistory = (duration: WinGoDuration, count: number = 30): PeriodHistory[] => {
   const now = Date.now();
+  const currentRoundIndex = Math.floor(now / (duration * 1000));
+  const list: PeriodHistory[] = [];
 
-  return nums.map((num, idx) => {
-    const roundTime = now - (idx + 1) * duration * 1000;
+  for (let i = 1; i <= count; i++) {
+    const roundIdx = currentRoundIndex - i;
+    const roundTime = roundIdx * duration * 1000;
     const period = getPeriodForTime(roundTime, duration);
+    const num = getDeterministicNumberForRound(roundIdx, duration);
     const bigSmall: 'Big' | 'Small' = num >= 5 ? 'Big' : 'Small';
+
     let color: 'green' | 'red' | 'purple_red' | 'purple_green';
     if (num === 0) color = 'purple_red';
     else if (num === 5) color = 'purple_green';
     else if ([1, 3, 7, 9].includes(num)) color = 'green';
     else color = 'red';
 
-    return {
+    list.push({
       period,
       number: num,
       bigSmall,
       color,
-    };
-  });
+    });
+  }
+
+  return list;
 };
 
 export const ColorPredictionGame: React.FC = () => {
-  const { balance, placeBet, recordGameResult, playSound, resetBalance, selectGame, setActiveView, winManagerEnabled } = useGame();
+  const {
+    balance,
+    placeBet,
+    recordGameResult,
+    playSound,
+    resetBalance,
+    selectGame,
+    setActiveView,
+    winManagerEnabled,
+    history,
+    user,
+  } = useGame();
+
+  const [betOutcomeFilter, setBetOutcomeFilter] = useState<'all' | 'wins' | 'losses'>('all');
+  const [betScopeFilter, setBetScopeFilter] = useState<'wingo' | 'all'>('wingo');
 
   const winManagerEnabledRef = useRef(winManagerEnabled);
   winManagerEnabledRef.current = winManagerEnabled;
@@ -109,12 +125,12 @@ export const ColorPredictionGame: React.FC = () => {
   // Mode selection: 30s, 1Min, 3Min, 5Min
   const [selectedDuration, setSelectedDuration] = useState<WinGoDuration>(30);
 
-  // Distinct history records for each of the 4 sections
+  // Distinct continuous history records for each of the 4 sections
   const [historiesByDuration, setHistoriesByDuration] = useState<Record<WinGoDuration, PeriodHistory[]>>(() => ({
-    30: createInitialHistory(30),
-    60: createInitialHistory(60),
-    180: createInitialHistory(180),
-    300: createInitialHistory(300),
+    30: createContinuousHistory(30),
+    60: createContinuousHistory(60),
+    180: createContinuousHistory(180),
+    300: createContinuousHistory(300),
   }));
 
   // Distinct active bets for each section
@@ -212,18 +228,81 @@ export const ColorPredictionGame: React.FC = () => {
       payout: number;
       isWin: boolean;
       outcomeNumber: number;
+      timestamp?: number;
     }>
   >([]);
+
+  // Unified all betting records for user's account & live session
+  const allBettingRecords = React.useMemo(() => {
+    const list: Array<{
+      id: string;
+      gameId: string;
+      gameTitle: string;
+      choice: string;
+      outcome: string;
+      betAmount: number;
+      payout: number;
+      isWin: boolean;
+      timestamp: number;
+      periodLabel?: string;
+    }> = [];
+
+    // From global persistent account history
+    history.forEach((h) => {
+      list.push({
+        id: h.id,
+        gameId: h.gameId,
+        gameTitle: h.gameTitle,
+        choice: h.choice,
+        outcome: h.outcome,
+        betAmount: h.betAmount,
+        payout: h.payout,
+        isWin: h.isWin,
+        timestamp: h.timestamp,
+        periodLabel: h.choice.includes('#') ? h.choice : `#${h.id.slice(-4)}`,
+      });
+    });
+
+    // From local session orders (if not yet in history)
+    myHistory.forEach((m, idx) => {
+      const exists = list.some(
+        (item) => item.gameId === 'color-prediction' && item.choice === m.target && item.betAmount === m.bet
+      );
+      if (!exists) {
+        list.push({
+          id: `local-${idx}-${m.period}`,
+          gameId: 'color-prediction',
+          gameTitle: 'Win Go Color Prediction',
+          choice: m.target,
+          outcome: `Number ${m.outcomeNumber}`,
+          betAmount: m.bet,
+          payout: m.payout,
+          isWin: m.isWin,
+          timestamp: m.timestamp || Date.now() - idx * 25000,
+          periodLabel: `#${m.period.slice(-4)}`,
+        });
+      }
+    });
+
+    return list.sort((a, b) => b.timestamp - a.timestamp);
+  }, [history, myHistory]);
 
   // Resolve Round logic for a specific section duration (30s, 1Min, 3Min, 5Min)
   const resolveRound = (dur: WinGoDuration) => {
     // Evaluate active bets for this section
     const betsToEvaluate = activeBetsByDurationRef.current[dur] || [];
 
-    // Outcome selection governed by Win Manager:
-    // When ON: all player bets win
-    // When OFF: all bets lose (or lowest bet wins if all options bet)
-    const drawnNumber = determineWinGoOutcome(betsToEvaluate, winManagerEnabledRef.current);
+    // Continuous global deterministic number for this completed round
+    const roundIndex = Math.floor(Date.now() / (dur * 1000)) - 1;
+    const defaultDeterministicNumber = getDeterministicNumberForRound(roundIndex, dur);
+
+    // Outcome selection: follows continuous global deterministic algorithm for all users across the website
+    // If player placed active bets and Win Manager is configured, it safely determines win/loss
+    const drawnNumber = determineWinGoOutcome(
+      betsToEvaluate,
+      winManagerEnabledRef.current,
+      defaultDeterministicNumber
+    );
     const bigSmall: 'Big' | 'Small' = drawnNumber >= 5 ? 'Big' : 'Small';
 
     let colorType: 'green' | 'red' | 'purple_red' | 'purple_green';
@@ -386,6 +465,38 @@ export const ColorPredictionGame: React.FC = () => {
 
     return () => clearInterval(timer);
   }, []); // Run on mount only!
+
+  // When window regains focus or visibility (or user switches back to tab),
+  // instantly synchronize the continuous history so no missed rounds exist
+  useEffect(() => {
+    const handleSync = () => {
+      const allModes: WinGoDuration[] = [30, 60, 180, 300];
+      setHistoriesByDuration((prev) => {
+        const next = { ...prev };
+        allModes.forEach((dur) => {
+          next[dur] = createContinuousHistory(dur, 30);
+        });
+        return next;
+      });
+
+      const activeDur = selectedDurationRef.current;
+      setTimeLeft(getContinuousRemainingSeconds(activeDur));
+    };
+
+    window.addEventListener('visibilitychange', handleSync);
+    window.addEventListener('focus', handleSync);
+    return () => {
+      window.removeEventListener('visibilitychange', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
+  }, []);
+
+  // Auto-close bet drawer if timer enters the 5s locked window
+  useEffect(() => {
+    if (timeLeft <= 5 && betModal.isOpen) {
+      setBetModal((prev) => ({ ...prev, isOpen: false }));
+    }
+  }, [timeLeft, betModal.isOpen]);
 
   // Mode Selection handler: switches mode and synchronizes real-time countdown for selected section
   const handleModeSelect = (duration: WinGoDuration) => {
@@ -744,7 +855,39 @@ export const ColorPredictionGame: React.FC = () => {
       </div>
 
       {/* 4. Main Betting Arena: Green, Violet, Red */}
-      <div className="px-3 space-y-3">
+      <div className="relative px-3 space-y-3">
+        {/* BIG SCREEN 5-SECOND COUNTDOWN OVERLAY ON SCREEN WHERE BETTING CLOSED */}
+        {timeLeft <= 5 && (
+          <div className="absolute inset-0 z-30 rounded-3xl bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in-95 duration-150 border-2 border-amber-400/60 shadow-2xl overflow-hidden select-none">
+            {/* Glowing radial backdrop */}
+            <div className="absolute -top-12 -left-12 w-48 h-48 rounded-full bg-amber-500/20 blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-12 -right-12 w-48 h-48 rounded-full bg-rose-500/20 blur-3xl pointer-events-none" />
+
+            {/* Giant Big Screen Timer Indicator */}
+            <div className="relative mb-4 flex items-center justify-center">
+              <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-full border-4 border-amber-400/30 animate-ping absolute pointer-events-none" />
+              <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full border-4 border-amber-400 bg-slate-900 shadow-[0_0_40px_rgba(245,158,11,0.7)] flex items-center justify-center">
+                <span className="text-6xl sm:text-7xl font-black font-mono text-amber-300 drop-shadow-[0_0_25px_rgba(251,191,36,0.9)] animate-pulse tabular-nums">
+                  {timeLeft}
+                </span>
+              </div>
+            </div>
+
+            {/* Prominent Status Banner */}
+            <div className="space-y-2 max-w-sm relative z-10 px-2">
+              <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-rose-600 text-white text-xs font-black uppercase tracking-widest shadow-lg border border-rose-400 animate-pulse">
+                <span>🛑 BETTING CLOSED</span>
+              </div>
+              <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-tight">
+                Drawing Issue #{currentPeriod.slice(-5)}
+              </h3>
+              <p className="text-xs text-amber-200/90 font-medium leading-relaxed">
+                Orders are locked. Live winning number will reveal in {timeLeft} second{timeLeft === 1 ? '' : 's'}...
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Colors Row */}
         <div className="grid grid-cols-3 gap-2.5">
           <button
@@ -1004,41 +1147,198 @@ export const ColorPredictionGame: React.FC = () => {
             </div>
           )}
 
-          {/* Tab 3: My Game Record */}
+          {/* Tab 3: My Game Record / All Betting History */}
           {bottomTab === 'my_record' && (
-            <div className="space-y-2 py-1 text-xs">
-              {myHistory.length > 0 ? (
-                myHistory.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between"
+            <div className="space-y-3 py-1 text-xs">
+              {/* Controls bar: Scope (Win Go / All Games) and Outcome (All / Wins in Green / Losses in Red) */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-2xl bg-slate-50 border border-slate-200">
+                {/* Scope selector */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-extrabold uppercase text-slate-400">View:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setBetScopeFilter('wingo');
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      betScopeFilter === 'wingo'
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                    }`}
                   >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-800">{item.target}</span>
-                        <span className="font-mono text-[10px] text-slate-400">
-                          #{item.period.slice(-4)}
-                        </span>
+                    Win Go Bets ({allBettingRecords.filter((b) => b.gameId === 'color-prediction').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setBetScopeFilter('all');
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      betScopeFilter === 'all'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    All Games ({allBettingRecords.length})
+                  </button>
+                </div>
+
+                {/* Outcome filters (Wins in Green, Losses in Red) */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-extrabold uppercase text-slate-400">Result:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setBetOutcomeFilter('all');
+                    }}
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-bold cursor-pointer transition-all ${
+                      betOutcomeFilter === 'all'
+                        ? 'bg-slate-800 text-white'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setBetOutcomeFilter('wins');
+                    }}
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-black cursor-pointer transition-all flex items-center gap-1 ${
+                      betOutcomeFilter === 'wins'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
+                    }`}
+                  >
+                    <Trophy className="w-3 h-3 text-emerald-600" />
+                    <span>Win (Green)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setBetOutcomeFilter('losses');
+                    }}
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-black cursor-pointer transition-all flex items-center gap-1 ${
+                      betOutcomeFilter === 'losses'
+                        ? 'bg-red-600 text-white shadow-xs'
+                        : 'bg-red-50 text-red-700 border border-red-300 hover:bg-red-100'
+                    }`}
+                  >
+                    <Frown className="w-3 h-3 text-red-600" />
+                    <span>Loss (Red)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Betting History List: Losses clearly in vibrant RED, Wins clearly in vibrant GREEN */}
+              {allBettingRecords
+                .filter((b) => {
+                  if (betScopeFilter === 'wingo' && b.gameId !== 'color-prediction') return false;
+                  if (betOutcomeFilter === 'wins' && !b.isWin) return false;
+                  if (betOutcomeFilter === 'losses' && b.isWin) return false;
+                  return true;
+                })
+                .length > 0 ? (
+                <div className="space-y-2">
+                  {allBettingRecords
+                    .filter((b) => {
+                      if (betScopeFilter === 'wingo' && b.gameId !== 'color-prediction') return false;
+                      if (betOutcomeFilter === 'wins' && !b.isWin) return false;
+                      if (betOutcomeFilter === 'losses' && b.isWin) return false;
+                      return true;
+                    })
+                    .map((item, idx) => (
+                      <div
+                        key={item.id || idx}
+                        className={`p-3 rounded-2xl border transition-all flex items-center justify-between shadow-2xs ${
+                          item.isWin
+                            ? 'bg-emerald-50/70 border-emerald-300 hover:border-emerald-400'
+                            : 'bg-red-50/70 border-red-300 hover:border-red-400'
+                        }`}
+                      >
+                        {/* Left: Icon, Target & Outcome */}
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                              item.isWin
+                                ? 'bg-emerald-100 border-emerald-300 text-emerald-700 shadow-xs'
+                                : 'bg-red-100 border-red-300 text-red-700 shadow-xs'
+                            }`}
+                          >
+                            {item.isWin ? (
+                              <Trophy className="w-4 h-4 text-emerald-600" />
+                            ) : (
+                              <Frown className="w-4 h-4 text-red-600" />
+                            )}
+                          </div>
+
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-extrabold text-slate-900 text-xs sm:text-sm">
+                                {item.choice}
+                              </span>
+                              {item.periodLabel && (
+                                <span className="font-mono text-[10px] text-slate-500 bg-white px-1.5 py-0.2 rounded border border-slate-200">
+                                  {item.periodLabel}
+                                </span>
+                              )}
+                              {item.gameId !== 'color-prediction' && (
+                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
+                                  {item.gameTitle}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-600 mt-0.5 flex items-center gap-1.5">
+                              <span>
+                                Outcome: <strong className="text-slate-800">{item.outcome}</strong>
+                              </span>
+                              <span>·</span>
+                              <span>Wager: ₹{item.betAmount}</span>
+                              <span className="hidden sm:inline">·</span>
+                              <span className="hidden sm:inline text-slate-400 text-[10px] font-mono">
+                                {new Date(item.timestamp).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  second: '2-digit',
+                                })}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right: Red/Green Outcome Badge & Return */}
+                        <div className="text-right shrink-0">
+                          <span
+                            className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shadow-2xs ${
+                              item.isWin
+                                ? 'bg-emerald-600 text-white border border-emerald-700'
+                                : 'bg-red-600 text-white border border-red-700'
+                            }`}
+                          >
+                            {item.isWin ? 'WIN' : 'LOSS'}
+                          </span>
+                          <div
+                            className={`font-mono font-black text-xs sm:text-sm mt-1 tabular-nums ${
+                              item.isWin ? 'text-emerald-700' : 'text-red-600'
+                            }`}
+                          >
+                            {item.isWin ? `+₹${item.payout.toLocaleString()}` : `-₹${item.betAmount.toLocaleString()}`}
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-[11px] text-slate-500 mt-0.5">
-                        Outcome: #{item.outcomeNumber} · Bet: {item.bet}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-black ${
-                        item.isWin ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
-                      }`}>
-                        {item.isWin ? 'WIN' : 'LOSS'}
-                      </span>
-                      <div className={`font-mono font-black text-xs mt-1 ${item.isWin ? 'text-emerald-600' : 'text-slate-500'}`}>
-                        {item.isWin ? `+${item.payout}` : '0'}
-                      </div>
-                    </div>
-                  </div>
-                ))
+                    ))}
+                </div>
               ) : (
-                <div className="py-8 text-center text-xs text-slate-400 font-medium">
-                  No previous orders placed in this session.
+                <div className="py-10 text-center rounded-2xl bg-slate-50 border border-slate-200 text-slate-400 font-medium">
+                  <p className="text-xs">No betting records match this filter.</p>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Place orders above on Green, Violet, Red, Big, Small, or Numbers to start your streak!
+                  </p>
                 </div>
               )}
             </div>

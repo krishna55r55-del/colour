@@ -22,8 +22,11 @@ import {
   RefreshCw,
   Copy,
   Check,
+  Users,
+  Clock,
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
+import { COBCLUB_DATABASE_SQL } from '../../lib/supabase';
 
 export const ProfileView: React.FC = () => {
   const {
@@ -42,6 +45,11 @@ export const ProfileView: React.FC = () => {
     withdrawRecords,
     supabaseStatus,
     refreshFromSupabase,
+    dailyBonus,
+    canClaimDailyBonus,
+    setIsDailyBonusModalOpen,
+    masterPlayerBets,
+    masterDepositRequests,
   } = useGame();
 
   const [showPassModal, setShowPassModal] = useState(false);
@@ -276,6 +284,132 @@ export const ProfileView: React.FC = () => {
         </button>
       </div>
 
+      {/* Admin Deposit Verification & Approval Card */}
+      <div className="p-5 rounded-3xl bg-gradient-to-r from-amber-500/10 via-amber-50 to-orange-50/40 border-2 border-amber-300 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center shrink-0 shadow-xs font-black">
+            <Crown className="w-6 h-6 text-slate-950" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">
+                👑 Admin Deposit Approval Desk
+              </span>
+              {masterDepositRequests.filter((d) => d.status === 'Pending').length > 0 ? (
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-600 text-white shadow-xs animate-pulse">
+                  {masterDepositRequests.filter((d) => d.status === 'Pending').length} Pending Approval
+                </span>
+              ) : (
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  All Verified
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-600 mt-0.5">
+              Review player UTR numbers &amp; payment screenshot proofs. Points are credited only when you approve!
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            playSound('click');
+            setActiveView('deposit');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className="px-5 py-2.5 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+        >
+          <span>Open Approval Desk</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* Daily Login Bonus Rewards Card */}
+      <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div
+            className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+              canClaimDailyBonus
+                ? 'bg-amber-100 border border-amber-300 text-amber-600 animate-pulse'
+                : 'bg-rose-50 border border-rose-200 text-rose-600'
+            }`}
+          >
+            <Gift className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">
+                Daily Login Bonus
+              </span>
+              <span
+                className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                  canClaimDailyBonus
+                    ? 'bg-amber-100 text-amber-900 border border-amber-300 animate-bounce'
+                    : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                }`}
+              >
+                {canClaimDailyBonus ? '★ Ready to Claim' : '✓ Claimed Today'}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Streak: <strong className="text-slate-800">Day {dailyBonus.streak || 0} of 7</strong> · Total Claimed: <strong className="text-emerald-600">₹{(dailyBonus.totalClaimed || 0).toLocaleString()}</strong> points
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            playSound('click');
+            setIsDailyBonusModalOpen(true);
+          }}
+          className={`px-4 py-2.5 rounded-full text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs ${
+            canClaimDailyBonus
+              ? 'bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white shadow-md'
+              : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+          }`}
+        >
+          <span>{canClaimDailyBonus ? 'Claim Daily Points' : 'Bonus Calendar'}</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* Master Player Records ("My Records") Platform Overview Card */}
+      <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shrink-0">
+            <Users className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">
+                👑 Master Player Records (My Records)
+              </span>
+              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-900 text-amber-300">
+                {masterPlayerBets.length} Bets Saved
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Every player&apos;s bets and round outcomes are automatically archived here and synced to your database.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            playSound('click');
+            setActiveView('history');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className="px-4 py-2.5 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 border border-amber-400 text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+        >
+          <span>Open Player Records</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
       {/* Supabase Cloud Database Sync Status Card */}
       <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-xs space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
@@ -329,7 +463,7 @@ export const ProfileView: React.FC = () => {
         </div>
 
         {/* Sync Entity Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
           <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
             <span className="text-[10px] uppercase font-bold text-slate-400 block">Wallet Balance</span>
             <span className="text-xs font-mono font-bold text-slate-800">₹{balance.toLocaleString()}</span>
@@ -337,15 +471,20 @@ export const ProfileView: React.FC = () => {
           </div>
           <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
             <span className="text-[10px] uppercase font-bold text-slate-400 block">Bet History</span>
-            <span className="text-xs font-mono font-bold text-slate-800">{stats.totalRounds} Rounds</span>
-            <span className="text-[10px] text-emerald-600 font-bold block mt-0.5">✓ Auto-Saved</span>
+            <span className="text-xs font-mono font-bold text-slate-800">{masterPlayerBets.length} Bets</span>
+            <span className="text-[10px] text-emerald-600 font-bold block mt-0.5">✓ My Records</span>
+          </div>
+          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Daily Bonus</span>
+            <span className="text-xs font-mono font-bold text-slate-800">Day {dailyBonus.streak || 0}</span>
+            <span className="text-[10px] text-emerald-600 font-bold block mt-0.5">✓ 24h Tracked</span>
           </div>
           <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
             <span className="text-[10px] uppercase font-bold text-slate-400 block">Deposit Records</span>
             <span className="text-xs font-mono font-bold text-slate-800">{user ? 'Active' : 'Guest'}</span>
             <span className="text-[10px] text-emerald-600 font-bold block mt-0.5">✓ Auto-Saved</span>
           </div>
-          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 col-span-2 sm:col-span-1">
             <span className="text-[10px] uppercase font-bold text-slate-400 block">Withdraw Records</span>
             <span className="text-xs font-mono font-bold text-slate-800">{withdrawRecords.length} Txns</span>
             <span className="text-[10px] text-emerald-600 font-bold block mt-0.5">✓ Auto-Saved</span>
@@ -607,89 +746,8 @@ export const ProfileView: React.FC = () => {
                 To enable permanent cloud storage in your Supabase project (wallet balance, bets, deposits, withdrawals, bank details), run this SQL in your Supabase SQL Editor:
               </p>
               <div className="relative">
-                <pre className="p-3 rounded-2xl bg-slate-900 text-slate-200 text-[11px] font-mono overflow-x-auto max-h-56 leading-relaxed">
-{`-- 1. Profiles Table (Wallet Balance)
-CREATE TABLE IF NOT EXISTS public.profiles (
-  id TEXT PRIMARY KEY,
-  phone_number TEXT NOT NULL,
-  member_id TEXT NOT NULL,
-  balance NUMERIC(12, 2) NOT NULL DEFAULT 1000.00,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 2. Bet History
-CREATE TABLE IF NOT EXISTS public.bet_history (
-  id TEXT PRIMARY KEY,
-  member_id TEXT NOT NULL,
-  phone_number TEXT,
-  game_id TEXT NOT NULL,
-  game_title TEXT NOT NULL,
-  bet_amount NUMERIC(12, 2) NOT NULL,
-  choice TEXT NOT NULL,
-  outcome TEXT NOT NULL,
-  payout NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-  net_profit NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-  is_win BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 3. Deposits
-CREATE TABLE IF NOT EXISTS public.deposits (
-  id TEXT PRIMARY KEY,
-  member_id TEXT NOT NULL,
-  phone_number TEXT,
-  amount NUMERIC(12, 2) NOT NULL,
-  bonus NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-  total_credit NUMERIC(12, 2) NOT NULL,
-  method TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'Completed',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 4. Withdrawals
-CREATE TABLE IF NOT EXISTS public.withdrawals (
-  id TEXT PRIMARY KEY,
-  member_id TEXT NOT NULL,
-  phone_number TEXT,
-  amount NUMERIC(12, 2) NOT NULL,
-  actual_amount NUMERIC(12, 2) NOT NULL,
-  fee NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-  bank_name TEXT NOT NULL,
-  account_number_masked TEXT NOT NULL,
-  account_holder_name TEXT NOT NULL,
-  ifsc_code TEXT,
-  upi_id TEXT,
-  status TEXT NOT NULL DEFAULT 'Processing',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 5. Bank Accounts
-CREATE TABLE IF NOT EXISTS public.bank_accounts (
-  id TEXT PRIMARY KEY,
-  member_id TEXT NOT NULL,
-  phone_number TEXT,
-  account_holder_name TEXT NOT NULL,
-  bank_name TEXT NOT NULL,
-  account_number TEXT NOT NULL,
-  ifsc_code TEXT NOT NULL,
-  upi_id TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- RLS & Policies
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.bet_history ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.deposits ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.withdrawals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.bank_accounts ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Allow public all on profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public all on bet_history" ON public.bet_history FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public all on deposits" ON public.deposits FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public all on withdrawals" ON public.withdrawals FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public all on bank_accounts" ON public.bank_accounts FOR ALL USING (true) WITH CHECK (true);`}
+                <pre className="p-3 rounded-2xl bg-slate-900 text-slate-200 text-[11px] font-mono overflow-x-auto max-h-56 leading-relaxed whitespace-pre-wrap">
+{COBCLUB_DATABASE_SQL}
                 </pre>
               </div>
             </div>
@@ -699,78 +757,7 @@ CREATE POLICY "Allow public all on bank_accounts" ON public.bank_accounts FOR AL
                 type="button"
                 onClick={() => {
                   playSound('click');
-                  const sql = `-- COBCLUB Database Schema for Supabase project: ijjzajfgdlpzbvxmypya
-CREATE TABLE IF NOT EXISTS public.profiles (
-  id TEXT PRIMARY KEY,
-  phone_number TEXT NOT NULL,
-  member_id TEXT NOT NULL,
-  balance NUMERIC(12, 2) NOT NULL DEFAULT 1000.00,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS public.bet_history (
-  id TEXT PRIMARY KEY,
-  member_id TEXT NOT NULL,
-  phone_number TEXT,
-  game_id TEXT NOT NULL,
-  game_title TEXT NOT NULL,
-  bet_amount NUMERIC(12, 2) NOT NULL,
-  choice TEXT NOT NULL,
-  outcome TEXT NOT NULL,
-  payout NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-  net_profit NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-  is_win BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS public.deposits (
-  id TEXT PRIMARY KEY,
-  member_id TEXT NOT NULL,
-  phone_number TEXT,
-  amount NUMERIC(12, 2) NOT NULL,
-  bonus NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-  total_credit NUMERIC(12, 2) NOT NULL,
-  method TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'Completed',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS public.withdrawals (
-  id TEXT PRIMARY KEY,
-  member_id TEXT NOT NULL,
-  phone_number TEXT,
-  amount NUMERIC(12, 2) NOT NULL,
-  actual_amount NUMERIC(12, 2) NOT NULL,
-  fee NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-  bank_name TEXT NOT NULL,
-  account_number_masked TEXT NOT NULL,
-  account_holder_name TEXT NOT NULL,
-  ifsc_code TEXT,
-  upi_id TEXT,
-  status TEXT NOT NULL DEFAULT 'Processing',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS public.bank_accounts (
-  id TEXT PRIMARY KEY,
-  member_id TEXT NOT NULL,
-  phone_number TEXT,
-  account_holder_name TEXT NOT NULL,
-  bank_name TEXT NOT NULL,
-  account_number TEXT NOT NULL,
-  ifsc_code TEXT NOT NULL,
-  upi_id TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.bet_history ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.deposits ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.withdrawals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.bank_accounts ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow public all on profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public all on bet_history" ON public.bet_history FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public all on deposits" ON public.deposits FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public all on withdrawals" ON public.withdrawals FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public all on bank_accounts" ON public.bank_accounts FOR ALL USING (true) WITH CHECK (true);`;
-                  navigator.clipboard?.writeText(sql);
+                  navigator.clipboard?.writeText(COBCLUB_DATABASE_SQL);
                   setCopiedSql(true);
                   setTimeout(() => setCopiedSql(false), 2500);
                 }}

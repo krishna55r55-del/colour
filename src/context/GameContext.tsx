@@ -9,6 +9,9 @@ import {
   WithdrawRecord,
   DepositRecord,
   SupabaseSyncStatus,
+  DailyBonusState,
+  DailyBonusRecord,
+  PlayerBetRecord,
 } from '../types';
 import { soundManager } from '../utils/audio';
 import {
@@ -16,12 +19,16 @@ import {
   updateWalletBalanceInSupabase,
   recordBetInSupabase,
   fetchBetHistoryFromSupabase,
+  fetchAllPlayerBetsFromSupabase,
   recordDepositInSupabase,
   fetchDepositsFromSupabase,
+  fetchAllDepositsFromSupabase,
+  updateDepositStatusInSupabase,
   recordWithdrawalInSupabase,
   fetchWithdrawalsFromSupabase,
   saveBankDetailsToSupabase,
   fetchBankDetailsFromSupabase,
+  recordDailyBonusInSupabase,
   testSupabaseConnection,
 } from '../lib/supabase';
 
@@ -57,6 +64,17 @@ interface GameContextType {
   refundBet: (amount: number) => void;
   recordGameResult: (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => void;
   deposit: (amount: number, bonus?: number, method?: string) => DepositRecord;
+  submitDepositRequest: (data: {
+    amount: number;
+    bonus: number;
+    method: string;
+    utr: string;
+    screenshot?: string;
+  }) => DepositRecord;
+  approveDepositRequest: (depositId: string) => { success: boolean; error?: string };
+  rejectDepositRequest: (depositId: string, reason?: string) => { success: boolean };
+  masterDepositRequests: DepositRecord[];
+  refreshMasterDeposits: () => Promise<void>;
   saveBankDetails: (details: BankAccountDetails) => void;
   submitWithdrawal: (amount: number, details: BankAccountDetails) => { success: boolean; error?: string; record?: WithdrawRecord };
   winManagerEnabled: boolean;
@@ -65,7 +83,25 @@ interface GameContextType {
   resetBalance: () => void;
   clearHistory: () => void;
   playSound: (type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss') => void;
+  dailyBonus: DailyBonusState;
+  claimDailyBonus: () => { success: boolean; amount: number; day: number; error?: string };
+  canClaimDailyBonus: boolean;
+  timeUntilNextBonus: number;
+  isDailyBonusModalOpen: boolean;
+  setIsDailyBonusModalOpen: (open: boolean) => void;
+  masterPlayerBets: PlayerBetRecord[];
+  refreshMasterPlayerBets: () => Promise<void>;
 }
+
+export const DAILY_BONUS_TIERS = [
+  { day: 1, points: 50, label: 'Day 1' },
+  { day: 2, points: 75, label: 'Day 2' },
+  { day: 3, points: 100, label: 'Day 3' },
+  { day: 4, points: 150, label: 'Day 4' },
+  { day: 5, points: 200, label: 'Day 5' },
+  { day: 6, points: 300, label: 'Day 6' },
+  { day: 7, points: 500, label: 'Day 7 VIP' },
+];
 
 // Global storage keys
 const STORAGE_KEY_AUTH = 'cobclub_auth_user_v1';
@@ -73,6 +109,17 @@ const STORAGE_KEY_ACCOUNTS = 'cobclub_registered_accounts_v1';
 const STORAGE_KEY_WIN_MANAGER = 'cobclub_win_manager_v1';
 const STORAGE_KEY_SOUND = 'cobclub_sound_pref_v1';
 const STORAGE_KEY_RECENT = 'cobclub_recent_games_v1';
+const STORAGE_KEY_MASTER_PLAYER_BETS = 'cobclub_master_player_records_v1';
+const STORAGE_KEY_MASTER_DEPOSITS = 'cobclub_master_deposits_v1';
+
+export const BONUS_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+export const defaultDailyBonus: DailyBonusState = {
+  lastClaimedAt: null,
+  streak: 0,
+  totalClaimed: 0,
+  history: [],
+};
 
 // User-scoped storage key helper
 const getUserKey = (phone: string, key: string) => `cobclub_${key}_${phone}`;
@@ -139,6 +186,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         bank: null,
         withdraws: [],
         deposits: [],
+        dailyBonus: defaultDailyBonus,
       };
     }
     try {
@@ -160,7 +208,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const savedD = localStorage.getItem(getUserKey(phone, 'deposits'));
       const deposits = savedD ? JSON.parse(savedD) : [];
 
-      return { balance, history, stats, bank, withdraws, deposits };
+      const savedBonus = localStorage.getItem(getUserKey(phone, 'daily_bonus'));
+      const dailyBonus: DailyBonusState = savedBonus ? JSON.parse(savedBonus) : defaultDailyBonus;
+
+      return { balance, history, stats, bank, withdraws, deposits, dailyBonus };
     } catch {
       return {
         balance: INITIAL_BALANCE,
@@ -169,6 +220,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         bank: null,
         withdraws: [],
         deposits: [],
+        dailyBonus: defaultDailyBonus,
       };
     }
   };
@@ -181,6 +233,26 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [savedBankDetails, setSavedBankDetails] = useState<BankAccountDetails | null>(initialData.bank);
   const [withdrawRecords, setWithdrawRecords] = useState<WithdrawRecord[]>(initialData.withdraws);
   const [depositRecords, setDepositRecords] = useState<DepositRecord[]>(initialData.deposits);
+  const [dailyBonus, setDailyBonus] = useState<DailyBonusState>(initialData.dailyBonus || defaultDailyBonus);
+  const [isDailyBonusModalOpen, setIsDailyBonusModalOpen] = useState<boolean>(false);
+  const [masterPlayerBets, setMasterPlayerBets] = useState<PlayerBetRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_MASTER_PLAYER_BETS);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [masterDepositRequests, setMasterDepositRequests] = useState<DepositRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_MASTER_DEPOSITS);
+      if (saved) return JSON.parse(saved);
+      return [];
+    } catch {
+      return [];
+    }
+  });
 
   const [recentlyPlayed, setRecentlyPlayed] = useState<GameId[]>(() => {
     try {
@@ -329,6 +401,27 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           localStorage.setItem(getUserKey(phone, 'bank'), JSON.stringify(cloudBank));
         } catch {}
       }
+
+      // 6. Sync daily login bonus tracking
+      if (profileSync.isSynced) {
+        if (profileSync.lastDailyBonusAt !== undefined || profileSync.dailyStreak !== undefined) {
+          setDailyBonus((prev) => {
+            const updated: DailyBonusState = {
+              ...prev,
+              lastClaimedAt: profileSync.lastDailyBonusAt !== undefined ? profileSync.lastDailyBonusAt : prev.lastClaimedAt,
+              streak: profileSync.dailyStreak !== undefined ? profileSync.dailyStreak : prev.streak,
+              totalClaimed: profileSync.totalBonusClaimed !== undefined ? profileSync.totalBonusClaimed : prev.totalClaimed,
+            };
+            try {
+              localStorage.setItem(getUserKey(phone, 'daily_bonus'), JSON.stringify(updated));
+            } catch {}
+            return updated;
+          });
+        }
+      }
+
+      // 7. Sync master player bet records ("player bet history will save in my records")
+      await refreshMasterPlayerBets();
     } catch (e) {
       console.warn('Supabase sync warning:', e);
     }
@@ -345,6 +438,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let accBank: BankAccountDetails | null = null;
     let accWithdraws: WithdrawRecord[] = [];
     let accDeposits: DepositRecord[] = [];
+    let accDailyBonus: DailyBonusState = defaultDailyBonus;
 
     if (!isNewReg) {
       try {
@@ -365,6 +459,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const savedD = localStorage.getItem(getUserKey(phone, 'deposits'));
         if (savedD) accDeposits = JSON.parse(savedD);
+
+        const savedBonus = localStorage.getItem(getUserKey(phone, 'daily_bonus'));
+        if (savedBonus) accDailyBonus = JSON.parse(savedBonus);
       } catch {}
     } else {
       // Initialize brand new account storage
@@ -374,6 +471,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem(getUserKey(phone, 'stats'), JSON.stringify(defaultStats));
         localStorage.setItem(getUserKey(phone, 'withdraws'), '[]');
         localStorage.setItem(getUserKey(phone, 'deposits'), '[]');
+        localStorage.setItem(getUserKey(phone, 'daily_bonus'), JSON.stringify(defaultDailyBonus));
         localStorage.removeItem(getUserKey(phone, 'bank'));
       } catch {}
     }
@@ -386,6 +484,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSavedBankDetails(accBank);
     setWithdrawRecords(accWithdraws);
     setDepositRecords(accDeposits);
+    setDailyBonus(accDailyBonus);
 
     // Save auth session
     try {
@@ -456,6 +555,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch {}
   }, [savedBankDetails, user?.phoneNumber]);
+
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      localStorage.setItem(getUserKey(phone, 'daily_bonus'), JSON.stringify(dailyBonus));
+    } catch {}
+  }, [dailyBonus, user?.phoneNumber]);
 
   useEffect(() => {
     try {
@@ -656,11 +763,116 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
     });
 
-    // Persist to user account in Supabase
+    // 1. Record bet into Master Player Records ("player bet history will save in my records")
+    const playerBetItem: PlayerBetRecord = {
+      ...fullItem,
+      memberId: user?.memberId || 'COB8892',
+      phoneNumber: user?.phoneNumber || '9876543210',
+    };
+
+    setMasterPlayerBets((prev) => {
+      const updated = [playerBetItem, ...prev.filter((b) => b.id !== playerBetItem.id)].slice(0, 300);
+      try {
+        localStorage.setItem(STORAGE_KEY_MASTER_PLAYER_BETS, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // 2. Persist to user account in Supabase
     if (user) {
       recordBetInSupabase(fullItem, user.memberId, user.phoneNumber);
       updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
+    } else {
+      recordBetInSupabase(fullItem, 'COB8892', '9876543210');
     }
+  };
+
+  const refreshMasterPlayerBets = async () => {
+    try {
+      const cloudAll = await fetchAllPlayerBetsFromSupabase();
+      if (cloudAll && cloudAll.length > 0) {
+        setMasterPlayerBets((prev) => {
+          const map = new Map<string, PlayerBetRecord>();
+          cloudAll.forEach((b) => map.set(b.id, b));
+          prev.forEach((b) => {
+            if (!map.has(b.id)) map.set(b.id, b);
+          });
+          const merged = Array.from(map.values())
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 300);
+          try {
+            localStorage.setItem(STORAGE_KEY_MASTER_PLAYER_BETS, JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+      }
+    } catch (e) {
+      console.warn('Master player bets sync error:', e);
+    }
+  };
+
+  const canClaimDailyBonus =
+    !dailyBonus.lastClaimedAt || Date.now() - dailyBonus.lastClaimedAt >= BONUS_COOLDOWN_MS;
+
+  const timeUntilNextBonus = dailyBonus.lastClaimedAt
+    ? Math.max(0, BONUS_COOLDOWN_MS - (Date.now() - dailyBonus.lastClaimedAt))
+    : 0;
+
+  const claimDailyBonus = (): { success: boolean; amount: number; day: number; error?: string } => {
+    if (!canClaimDailyBonus) {
+      const hours = Math.ceil(timeUntilNextBonus / (1000 * 60 * 60));
+      return {
+        success: false,
+        amount: 0,
+        day: dailyBonus.streak || 1,
+        error: `Daily bonus already claimed! Next bonus ready in ${hours} hour${hours > 1 ? 's' : ''}.`,
+      };
+    }
+
+    let nextDay = 1;
+    if (dailyBonus.lastClaimedAt) {
+      const timeSinceLastClaim = Date.now() - dailyBonus.lastClaimedAt;
+      if (timeSinceLastClaim <= 48 * 60 * 60 * 1000) {
+        nextDay = (dailyBonus.streak % 7) + 1;
+      } else {
+        nextDay = 1;
+      }
+    } else {
+      nextDay = 1;
+    }
+
+    const tier = DAILY_BONUS_TIERS.find((t) => t.day === nextDay) || DAILY_BONUS_TIERS[0];
+    const points = tier.points;
+    const nextBalance = balance + points;
+
+    const newRecord: DailyBonusRecord = {
+      id: 'DB_' + Date.now(),
+      day: nextDay,
+      amount: points,
+      claimedAt: Date.now(),
+    };
+
+    const nextTotal = (dailyBonus.totalClaimed || 0) + points;
+    const nextBonusState: DailyBonusState = {
+      lastClaimedAt: Date.now(),
+      streak: nextDay,
+      totalClaimed: nextTotal,
+      history: [newRecord, ...dailyBonus.history].slice(0, 30),
+    };
+
+    setDailyBonus(nextBonusState);
+    setBalance(nextBalance);
+    playSound('jackpot');
+
+    if (user?.phoneNumber) {
+      try {
+        localStorage.setItem(getUserKey(user.phoneNumber, 'daily_bonus'), JSON.stringify(nextBonusState));
+        localStorage.setItem(getUserKey(user.phoneNumber, 'balance'), nextBalance.toString());
+      } catch {}
+      recordDailyBonusInSupabase(user.memberId, user.phoneNumber, points, nextDay, nextTotal, nextBalance);
+    }
+
+    return { success: true, amount: points, day: nextDay };
   };
 
   const resetBalance = () => {
@@ -671,41 +883,193 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const deposit = (amount: number, bonus: number = 0, method: string = 'UPI Instant'): DepositRecord => {
-    const totalCredit = amount + bonus;
-    const nextBalance = balance + totalCredit;
-    setBalance(nextBalance);
-    playSound('jackpot');
-
+  const submitDepositRequest = (data: {
+    amount: number;
+    bonus: number;
+    method: string;
+    utr: string;
+    screenshot?: string;
+  }): DepositRecord => {
+    const totalCredit = data.amount + data.bonus;
     const txnId = 'DEP' + Math.floor(1000000 + Math.random() * 9000000);
     const newRecord: DepositRecord = {
       id: txnId,
-      amount,
-      bonus,
+      memberId: user?.memberId || 'COB8892',
+      phoneNumber: user?.phoneNumber || '9876543210',
+      amount: data.amount,
+      bonus: data.bonus,
       totalCredit,
-      method: method.toUpperCase(),
+      method: data.method.toUpperCase(),
+      utr: data.utr.trim(),
+      screenshot: data.screenshot,
       timestamp: Date.now(),
-      status: 'Completed',
+      status: 'Pending', // PENDING APPROVAL! Points are only credited once admin approves
     };
 
     setDepositRecords((prev) => [newRecord, ...prev]);
 
-    // Persist to user account in Supabase
+    setMasterDepositRequests((prev) => {
+      const updated = [newRecord, ...prev.filter((d) => d.id !== txnId)].slice(0, 150);
+      try {
+        localStorage.setItem(STORAGE_KEY_MASTER_DEPOSITS, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
     if (user) {
-      updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
-      recordDepositInSupabase({
-        id: txnId,
-        memberId: user.memberId,
-        phoneNumber: user.phoneNumber,
-        amount,
-        bonus,
-        totalCredit,
-        method,
-        status: 'Completed',
-      });
+      try {
+        localStorage.setItem(
+          getUserKey(user.phoneNumber, 'deposits'),
+          JSON.stringify([newRecord, ...depositRecords.slice(0, 29)])
+        );
+      } catch {}
     }
 
+    recordDepositInSupabase(newRecord);
+    playSound('click');
     return newRecord;
+  };
+
+  const approveDepositRequest = (depositId: string): { success: boolean; error?: string } => {
+    const req =
+      masterDepositRequests.find((d) => d.id === depositId) ||
+      depositRecords.find((d) => d.id === depositId);
+
+    if (!req) return { success: false, error: 'Deposit request record not found.' };
+
+    if (req.status === 'Completed') {
+      return { success: false, error: 'Deposit has already been approved and credited.' };
+    }
+
+    const approvedAt = Date.now();
+    const updatedReq: DepositRecord = {
+      ...req,
+      status: 'Completed',
+      approvedAt,
+    };
+
+    // 1. Update master deposit requests
+    setMasterDepositRequests((prev) => {
+      const updated = prev.map((d) => (d.id === req.id ? updatedReq : d));
+      try {
+        localStorage.setItem(STORAGE_KEY_MASTER_DEPOSITS, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // 2. Check if current active user is the recipient
+    const isCurrentActiveUser =
+      user && (user.phoneNumber === req.phoneNumber || user.memberId === req.memberId);
+
+    if (isCurrentActiveUser) {
+      const nextBal = balance + req.totalCredit;
+      setBalance(nextBal);
+      setDepositRecords((prev) => prev.map((d) => (d.id === req.id ? updatedReq : d)));
+      playSound('jackpot');
+
+      if (user) {
+        try {
+          localStorage.setItem(getUserKey(user.phoneNumber, 'balance'), nextBal.toString());
+          const userDeps = depositRecords.map((d) => (d.id === req.id ? updatedReq : d));
+          localStorage.setItem(getUserKey(user.phoneNumber, 'deposits'), JSON.stringify(userDeps));
+        } catch {}
+        updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBal);
+      }
+    } else {
+      // Target user is another registered user: credit their stored balance
+      try {
+        if (req.phoneNumber) {
+          const targetPhone = req.phoneNumber;
+          const savedBal = localStorage.getItem(getUserKey(targetPhone, 'balance'));
+          const currentBal = savedBal !== null ? Math.max(0, parseInt(savedBal, 10)) : INITIAL_BALANCE;
+          const nextBal = currentBal + req.totalCredit;
+          localStorage.setItem(getUserKey(targetPhone, 'balance'), nextBal.toString());
+
+          const rawDeps = localStorage.getItem(getUserKey(targetPhone, 'deposits'));
+          const list: DepositRecord[] = rawDeps ? JSON.parse(rawDeps) : [];
+          const updList = list.some((d) => d.id === req.id)
+            ? list.map((d) => (d.id === req.id ? updatedReq : d))
+            : [updatedReq, ...list];
+          localStorage.setItem(getUserKey(targetPhone, 'deposits'), JSON.stringify(updList));
+
+          const rawAccs = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
+          if (rawAccs) {
+            const accs = JSON.parse(rawAccs);
+            const idx = accs.findIndex((a: any) => a.phoneNumber === targetPhone);
+            if (idx >= 0) {
+              accs[idx].balance = nextBal;
+              localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(accs));
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Error crediting offline account:', err);
+      }
+
+      if (req.memberId && req.phoneNumber) {
+        updateWalletBalanceInSupabase(req.memberId, req.phoneNumber, req.totalCredit);
+      }
+    }
+
+    updateDepositStatusInSupabase(req.id, 'Completed');
+    return { success: true };
+  };
+
+  const rejectDepositRequest = (depositId: string, reason?: string): { success: boolean } => {
+    const rejectedReason = reason || 'Payment not verified (Invalid UTR or screenshot mismatch)';
+
+    setMasterDepositRequests((prev) => {
+      const updated = prev.map((d) =>
+        d.id === depositId ? { ...d, status: 'Rejected' as const, rejectedReason } : d
+      );
+      try {
+        localStorage.setItem(STORAGE_KEY_MASTER_DEPOSITS, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    setDepositRecords((prev) =>
+      prev.map((d) =>
+        d.id === depositId ? { ...d, status: 'Rejected' as const, rejectedReason } : d
+      )
+    );
+
+    updateDepositStatusInSupabase(depositId, 'Rejected', rejectedReason);
+    playSound('loss');
+    return { success: true };
+  };
+
+  const refreshMasterDeposits = async () => {
+    try {
+      const cloudAll = await fetchAllDepositsFromSupabase();
+      if (cloudAll && cloudAll.length > 0) {
+        setMasterDepositRequests((prev) => {
+          const map = new Map<string, DepositRecord>();
+          cloudAll.forEach((d) => map.set(d.id, d));
+          prev.forEach((d) => {
+            if (!map.has(d.id)) map.set(d.id, d);
+          });
+          const merged = Array.from(map.values()).sort((a, b) => b.timestamp - a.timestamp);
+          try {
+            localStorage.setItem(STORAGE_KEY_MASTER_DEPOSITS, JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+      }
+    } catch (e) {
+      console.warn('Refresh master deposits error:', e);
+    }
+  };
+
+  const deposit = (amount: number, bonus: number = 0, method: string = 'UPI Fast'): DepositRecord => {
+    // When deposit is invoked without UTR, submit request for admin verification
+    const mockUtr = String(Math.floor(100000000000 + Math.random() * 900000000000));
+    return submitDepositRequest({
+      amount,
+      bonus,
+      method,
+      utr: mockUtr,
+    });
   };
 
   const toggleWinManager = () => {
@@ -820,6 +1184,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         placeBet,
         refundBet,
         deposit,
+        submitDepositRequest,
+        approveDepositRequest,
+        rejectDepositRequest,
+        masterDepositRequests,
+        refreshMasterDeposits,
         saveBankDetails,
         submitWithdrawal,
         winManagerEnabled,
@@ -829,6 +1198,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resetBalance,
         clearHistory,
         playSound,
+        dailyBonus,
+        claimDailyBonus,
+        canClaimDailyBonus,
+        timeUntilNextBonus,
+        isDailyBonusModalOpen,
+        setIsDailyBonusModalOpen,
+        masterPlayerBets,
+        refreshMasterPlayerBets,
       }}
     >
       {children}

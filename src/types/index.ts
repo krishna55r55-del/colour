@@ -56,6 +56,28 @@ export interface UserProfile {
   phoneNumber: string;
   memberId: string;
   registeredAt: number;
+  lastDailyBonusAt?: number;
+  dailyStreak?: number;
+  totalBonusClaimed?: number;
+}
+
+export interface PlayerBetRecord extends GameHistoryItem {
+  memberId: string;
+  phoneNumber?: string;
+}
+
+export interface DailyBonusRecord {
+  id: string;
+  day: number;
+  amount: number;
+  claimedAt: number;
+}
+
+export interface DailyBonusState {
+  lastClaimedAt: number | null;
+  streak: number; // 0 to 7
+  totalClaimed: number;
+  history: DailyBonusRecord[];
 }
 
 export interface BankAccountDetails {
@@ -81,12 +103,18 @@ export interface WithdrawRecord {
 
 export interface DepositRecord {
   id: string;
+  memberId?: string;
+  phoneNumber?: string;
   amount: number;
   bonus: number;
   totalCredit: number;
   method: string;
+  utr?: string;
+  screenshot?: string;
   timestamp: number;
-  status: 'Completed' | 'Pending';
+  status: 'Completed' | 'Pending' | 'Rejected';
+  approvedAt?: number;
+  rejectedReason?: string;
 }
 
 export interface SupabaseSyncStatus {

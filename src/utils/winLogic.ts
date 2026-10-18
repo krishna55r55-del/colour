@@ -48,15 +48,29 @@ export const calculateBetPayout = (
   return 0;
 };
 
+/**
+ * Global Deterministic Continuous Prediction Number Generator
+ * Returns the exact same number (0-9) for any round index and duration across all users and devices,
+ * whether the site is open, closed, or refreshed.
+ */
+export const getDeterministicNumberForRound = (roundIndex: number, durationSec: number): number => {
+  let h = Math.imul(roundIndex ^ 0x61c88647, 0x9e3779b9) ^ Math.imul(durationSec, 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 16), 0x21f0aaad);
+  h = Math.imul(h ^ (h >>> 15), 0x735a2d97);
+  h = (h ^ (h >>> 15)) >>> 0;
+  return h % 10;
+};
+
 export const determineWinGoOutcome = (
   bets: BetOrderEval[],
-  winManagerEnabled: boolean
+  winManagerEnabled: boolean,
+  defaultNumber?: number
 ): number => {
   const allNumbers = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-  // Natural draw if no active bets
+  // Natural draw if no active bets: return the continuous global deterministic number
   if (!bets || bets.length === 0) {
-    return Math.floor(Math.random() * 10);
+    return typeof defaultNumber === 'number' ? defaultNumber : Math.floor(Math.random() * 10);
   }
 
   // Pre-calculate evaluation for all 10 possible outcome numbers
