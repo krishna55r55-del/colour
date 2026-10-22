@@ -13,6 +13,7 @@ import { HistoryView } from './components/views/HistoryView';
 import { ProfileView } from './components/views/ProfileView';
 import { DepositView } from './components/views/DepositView';
 import { WithdrawView } from './components/views/WithdrawView';
+import { AdminApprovalView } from './components/views/AdminApprovalView';
 
 // 10 Playable Games
 import { ColorPredictionGame } from './components/games/ColorPredictionGame';
@@ -87,6 +88,8 @@ const AppContent: React.FC = () => {
         return <DepositView />;
       case 'withdraw':
         return <WithdrawView />;
+      case 'admin':
+        return <AdminApprovalView />;
       default:
         return <HomeView />;
     }

@@ -1,5 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
-import { BankAccountDetails, DepositRecord, GameHistoryItem, PlayerBetRecord, WithdrawRecord } from '../types';
+import {
+  BankAccountDetails,
+  DepositRecord,
+  GameHistoryItem,
+  PlayerBetRecord,
+  PredictionRoundRecord,
+  WithdrawRecord,
+} from '../types';
 
 export const SUPABASE_URL =
   import.meta.env.VITE_SUPABASE_URL || 'https://ijjzajfgdlpzbvxmypya.supabase.co';
@@ -45,7 +52,7 @@ export async function testSupabaseConnection(): Promise<{
 }> {
   const missingTables: string[] = [];
   try {
-    const requiredTables = ['profiles', 'bet_history', 'deposits', 'withdrawals', 'bank_accounts', 'daily_bonuses'];
+    const requiredTables = ['profiles', 'bet_history', 'game_rounds', 'deposits', 'withdrawals', 'bank_accounts', 'daily_bonuses'];
     for (const t of requiredTables) {
       const { error } = await supabase.from(t).select('id').limit(1);
       if (error && (error.code === 'PGRST205' || error.message?.includes('schema cache'))) {
@@ -63,7 +70,7 @@ export async function testSupabaseConnection(): Promise<{
       connected: false,
       tablesReady: false,
       projectRef: 'ijjzajfgdlpzbvxmypya',
-      missingTables: ['profiles', 'bet_history', 'deposits', 'withdrawals', 'bank_accounts', 'daily_bonuses'],
+      missingTables: ['profiles', 'bet_history', 'game_rounds', 'deposits', 'withdrawals', 'bank_accounts', 'daily_bonuses'],
     };
   }
 }
@@ -158,7 +165,8 @@ export async function updateWalletBalanceInSupabase(
 }
 
 /**
- * Record a game bet outcome in Supabase linked directly to the user's login account
+ * Record or upsert a game bet in Supabase immediately upon placement
+ * Supports both 'Pending' and 'Completed' states with idempotency
  */
 export async function recordBetInSupabase(
   item: GameHistoryItem,
@@ -166,7 +174,7 @@ export async function recordBetInSupabase(
   phoneNumber?: string
 ): Promise<boolean> {
   try {
-    const { error } = await supabase.from('bet_history').insert({
+    const payload: any = {
       id: item.id,
       member_id: memberId,
       phone_number: phoneNumber || null,
@@ -178,8 +186,46 @@ export async function recordBetInSupabase(
       payout: item.payout,
       net_profit: item.netProfit,
       is_win: item.isWin,
+      status: item.status || (item.payout > 0 || item.outcome !== 'Pending Resolution' ? 'Completed' : 'Pending'),
+      period: item.period || null,
+      target: item.target || null,
+      multiplier: item.multiplier || 2.0,
       created_at: new Date(item.timestamp).toISOString(),
-    });
+    };
+    if (item.settledAt) {
+      payload.settled_at = new Date(item.settledAt).toISOString();
+    }
+
+    const { error } = await supabase.from('bet_history').upsert(payload, { onConflict: 'id' });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Update a bet once resolved in Supabase (transition from Pending -> Win/Loss)
+ */
+export async function updateBetOutcomeInSupabase(
+  betId: string,
+  outcome: string,
+  payout: number,
+  netProfit: number,
+  isWin: boolean,
+  settledAt: number = Date.now()
+): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('bet_history')
+      .update({
+        status: 'Completed',
+        outcome,
+        payout,
+        net_profit: netProfit,
+        is_win: isWin,
+        settled_at: new Date(settledAt).toISOString(),
+      })
+      .eq('id', betId);
     return !error;
   } catch {
     return false;
@@ -198,7 +244,7 @@ export async function fetchBetHistoryFromSupabase(
       .from('bet_history')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(60);
+      .limit(100);
 
     if (phoneNumber && memberId) {
       query = query.or(`member_id.eq.${memberId},phone_number.eq.${phoneNumber}`);
@@ -221,6 +267,67 @@ export async function fetchBetHistoryFromSupabase(
       netProfit: Number(row.net_profit),
       isWin: Boolean(row.is_win),
       timestamp: new Date(row.created_at).getTime(),
+      status: (row.status as 'Pending' | 'Completed') || (row.outcome === 'Pending Resolution' ? 'Pending' : 'Completed'),
+      period: row.period || undefined,
+      target: row.target || undefined,
+      multiplier: row.multiplier ? Number(row.multiplier) : undefined,
+      settledAt: row.settled_at ? new Date(row.settled_at).getTime() : undefined,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Record a finalized prediction round in Supabase
+ */
+export async function recordGameRoundInSupabase(round: PredictionRoundRecord): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('game_rounds').upsert(
+      {
+        id: round.id,
+        duration: round.duration,
+        period: round.period,
+        round_index: round.roundIndex,
+        number: round.number,
+        color: round.color,
+        big_small: round.bigSmall,
+        finalized_at: new Date(round.finalizedAt).toISOString(),
+      },
+      { onConflict: 'duration,period' }
+    );
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fetch finalized game rounds for a duration from Supabase
+ */
+export async function fetchGameRoundsFromSupabase(
+  duration: number,
+  limit: number = 50
+): Promise<PredictionRoundRecord[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('game_rounds')
+      .select('*')
+      .eq('duration', duration)
+      .order('round_index', { ascending: false })
+      .limit(limit);
+
+    if (error || !data) return null;
+
+    return data.map((r: any) => ({
+      id: r.id,
+      duration: Number(r.duration),
+      period: r.period,
+      roundIndex: Number(r.round_index),
+      number: Number(r.number),
+      color: r.color,
+      bigSmall: r.big_small,
+      finalizedAt: new Date(r.finalized_at).getTime(),
     }));
   } catch {
     return null;
@@ -575,7 +682,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 2. Bet History (Player Bet Records)
+-- 2. Bet History (Player Bet Records, including Pending and Completed)
 CREATE TABLE IF NOT EXISTS public.bet_history (
   id TEXT PRIMARY KEY,
   member_id TEXT NOT NULL,
@@ -588,10 +695,27 @@ CREATE TABLE IF NOT EXISTS public.bet_history (
   payout NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
   net_profit NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
   is_win BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  status TEXT NOT NULL DEFAULT 'Pending',
+  period TEXT,
+  target TEXT,
+  multiplier NUMERIC(6, 2) DEFAULT 2.00,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  settled_at TIMESTAMPTZ
 );
 
--- 3. Daily Login Bonuses Table
+-- 3. Game Rounds Table (stores finalized continuous round results permanently for all users)
+CREATE TABLE IF NOT EXISTS public.game_rounds (
+  id TEXT PRIMARY KEY,
+  duration INT NOT NULL,
+  period TEXT NOT NULL,
+  round_index BIGINT NOT NULL,
+  number INT NOT NULL,
+  color TEXT NOT NULL,
+  big_small TEXT NOT NULL,
+  finalized_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 4. Daily Login Bonuses Table
 CREATE TABLE IF NOT EXISTS public.daily_bonuses (
   id TEXT PRIMARY KEY,
   member_id TEXT NOT NULL,
@@ -601,7 +725,7 @@ CREATE TABLE IF NOT EXISTS public.daily_bonuses (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 4. Deposits
+-- 5. Deposits
 CREATE TABLE IF NOT EXISTS public.deposits (
   id TEXT PRIMARY KEY,
   member_id TEXT NOT NULL,
@@ -618,7 +742,7 @@ CREATE TABLE IF NOT EXISTS public.deposits (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 5. Withdrawals
+-- 6. Withdrawals
 CREATE TABLE IF NOT EXISTS public.withdrawals (
   id TEXT PRIMARY KEY,
   member_id TEXT NOT NULL,
@@ -635,7 +759,7 @@ CREATE TABLE IF NOT EXISTS public.withdrawals (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 6. Bank Accounts
+-- 7. Bank Accounts
 CREATE TABLE IF NOT EXISTS public.bank_accounts (
   id TEXT PRIMARY KEY,
   member_id TEXT NOT NULL,
@@ -649,9 +773,17 @@ CREATE TABLE IF NOT EXISTS public.bank_accounts (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Performance Indexes & Constraints
+CREATE INDEX IF NOT EXISTS idx_bet_history_member ON public.bet_history (member_id);
+CREATE INDEX IF NOT EXISTS idx_bet_history_created ON public.bet_history (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bet_history_period ON public.bet_history (period);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_game_rounds_period ON public.game_rounds (duration, period);
+CREATE INDEX IF NOT EXISTS idx_game_rounds_order ON public.game_rounds (duration, round_index DESC);
+
 -- Row Level Security (RLS) & Public Access Policies
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bet_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.game_rounds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.daily_bonuses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.deposits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.withdrawals ENABLE ROW LEVEL SECURITY;
@@ -659,6 +791,7 @@ ALTER TABLE public.bank_accounts ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow public all on profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all on bet_history" ON public.bet_history FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all on game_rounds" ON public.game_rounds FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all on daily_bonuses" ON public.daily_bonuses FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all on deposits" ON public.deposits FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all on withdrawals" ON public.withdrawals FOR ALL USING (true) WITH CHECK (true);

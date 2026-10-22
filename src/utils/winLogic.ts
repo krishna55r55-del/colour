@@ -143,3 +143,119 @@ export const determineWinGoOutcome = (
   const picked = lowestCandidates[Math.floor(Math.random() * lowestCandidates.length)];
   return picked.num;
 };
+
+// Period prefix helper
+export const getPeriodPrefix = (durationSec: number): string => {
+  switch (durationSec) {
+    case 30: return '30';
+    case 60: return '01';
+    case 180: return '03';
+    case 300: return '05';
+    default: return '30';
+  }
+};
+
+/**
+ * Generate standard continuous period issue string from timestamp: YYYYMMDD + prefix + roundOfDay (4 digits)
+ */
+export const getPeriodForTime = (timeMs: number, durationSec: number = 30): string => {
+  const date = new Date(timeMs);
+  const yyyy = date.getFullYear().toString();
+  const mm = (date.getMonth() + 1).toString().padStart(2, '0');
+  const dd = date.getDate().toString().padStart(2, '0');
+  const secondsSinceMidnight = date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
+  const roundOfDay = Math.floor(secondsSinceMidnight / durationSec) + 1;
+  const prefix = getPeriodPrefix(durationSec);
+  return `${yyyy}${mm}${dd}${prefix}${roundOfDay.toString().padStart(4, '0')}`;
+};
+
+/**
+ * Calculate exact remaining seconds in continuous cycle for any duration
+ */
+export const getContinuousRemainingSeconds = (durationSec: number): number => {
+  const secInCycle = Math.floor((Date.now() / 1000) % durationSec);
+  const rem = durationSec - secInCycle;
+  return rem === 0 ? durationSec : rem;
+};
+
+/**
+ * Deterministically reconstruct round index, start time, and end time from a period string
+ */
+export const parsePeriodToTimestamp = (
+  period: string,
+  durationSec: number = 30
+): { roundIdx: number; roundStartTime: number; roundEndTime: number } => {
+  try {
+    const yyyy = parseInt(period.slice(0, 4), 10);
+    const mm = parseInt(period.slice(4, 6), 10) - 1;
+    const dd = parseInt(period.slice(6, 8), 10);
+    const roundOfDay = parseInt(period.slice(10, 14), 10);
+
+    const startOfDayMs = new Date(yyyy, mm, dd, 0, 0, 0, 0).getTime();
+    const secondsSinceMidnight = (roundOfDay - 1) * durationSec;
+    const roundStartTime = startOfDayMs + secondsSinceMidnight * 1000;
+    const roundEndTime = roundStartTime + durationSec * 1000;
+    const roundIdx = Math.floor(roundStartTime / (durationSec * 1000));
+
+    return { roundIdx, roundStartTime, roundEndTime };
+  } catch {
+    const now = Date.now();
+    const roundIdx = Math.floor(now / (durationSec * 1000));
+    return {
+      roundIdx,
+      roundStartTime: roundIdx * durationSec * 1000,
+      roundEndTime: (roundIdx + 1) * durationSec * 1000,
+    };
+  }
+};
+
+export interface FinalizedRoundResult {
+  period: string;
+  duration: number;
+  roundIndex: number;
+  number: number;
+  bigSmall: 'Big' | 'Small';
+  color: 'green' | 'red' | 'purple_red' | 'purple_green';
+}
+
+/**
+ * Returns the exact continuous finalized result for a period and duration
+ * Identical across all devices, users, refreshes, and database loads
+ */
+export const getFinalizedRound = (period: string, durationSec: number): FinalizedRoundResult => {
+  const { roundIdx } = parsePeriodToTimestamp(period, durationSec);
+  const num = getDeterministicNumberForRound(roundIdx, durationSec);
+  const bigSmall: 'Big' | 'Small' = num >= 5 ? 'Big' : 'Small';
+
+  let color: 'green' | 'red' | 'purple_red' | 'purple_green';
+  if (num === 0) color = 'purple_red';
+  else if (num === 5) color = 'purple_green';
+  else if ([1, 3, 7, 9].includes(num)) color = 'green';
+  else color = 'red';
+
+  return {
+    period,
+    duration: durationSec,
+    roundIndex: roundIdx,
+    number: num,
+    bigSmall,
+    color,
+  };
+};
+
+/**
+ * Evaluate bet outcome and return { isWin, payout, netProfit }
+ */
+export const evaluateWinGoBet = (
+  target: BetOrderEval['target'],
+  amount: number,
+  drawnNumber: number
+): { isWin: boolean; payout: number; netProfit: number } => {
+  const payout = calculateBetPayout(target, amount, drawnNumber);
+  const isWin = payout > 0;
+  return {
+    isWin,
+    payout,
+    netProfit: payout - amount,
+  };
+};

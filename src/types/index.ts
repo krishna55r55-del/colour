@@ -38,6 +38,32 @@ export interface GameHistoryItem {
   netProfit: number;
   isWin: boolean;
   timestamp: number;
+  status?: 'Pending' | 'Completed';
+  period?: string;
+  target?: string;
+  multiplier?: number;
+  duration?: number;
+  settledAt?: number;
+}
+
+export interface PredictionRoundRecord {
+  id: string;
+  duration: number;
+  period: string;
+  roundIndex: number;
+  number: number;
+  color: 'green' | 'red' | 'purple_red' | 'purple_green';
+  bigSmall: 'Big' | 'Small';
+  finalizedAt: number;
+}
+
+export interface WinGoBetOrderInput {
+  period: string;
+  duration: number; // 30, 60, 180, 300
+  target: 'green' | 'purple' | 'red' | 'big' | 'small' | number;
+  label: string;
+  multiplier: number;
+  amount: number;
 }
 
 export interface UserStats {
@@ -125,4 +151,4 @@ export interface SupabaseSyncStatus {
   lastSyncedAt: number | null;
 }
 
-export type ViewType = 'home' | 'all-games' | 'history' | 'profile' | 'game' | 'deposit' | 'withdraw';
+export type ViewType = 'home' | 'all-games' | 'history' | 'profile' | 'game' | 'deposit' | 'withdraw' | 'admin';

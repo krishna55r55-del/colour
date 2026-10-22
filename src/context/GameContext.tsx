@@ -12,12 +12,15 @@ import {
   DailyBonusState,
   DailyBonusRecord,
   PlayerBetRecord,
+  WinGoBetOrderInput,
 } from '../types';
 import { soundManager } from '../utils/audio';
 import {
   syncUserProfile,
   updateWalletBalanceInSupabase,
   recordBetInSupabase,
+  updateBetOutcomeInSupabase,
+  recordGameRoundInSupabase,
   fetchBetHistoryFromSupabase,
   fetchAllPlayerBetsFromSupabase,
   recordDepositInSupabase,
@@ -31,6 +34,11 @@ import {
   recordDailyBonusInSupabase,
   testSupabaseConnection,
 } from '../lib/supabase';
+import {
+  parsePeriodToTimestamp,
+  getFinalizedRound,
+  evaluateWinGoBet,
+} from '../utils/winLogic';
 
 interface StoredAccount {
   phoneNumber: string;
@@ -62,6 +70,9 @@ interface GameContextType {
   selectGame: (id: GameId | null) => void;
   placeBet: (amount: number) => boolean;
   refundBet: (amount: number) => void;
+  submitWinGoBet: (order: WinGoBetOrderInput) => { success: boolean; betId?: string; error?: string };
+  pendingWinGoBets: GameHistoryItem[];
+  settleWinGoBets: () => Promise<void>;
   recordGameResult: (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => void;
   deposit: (amount: number, bonus?: number, method?: string) => DepositRecord;
   submitDepositRequest: (data: {
@@ -306,6 +317,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const balanceRef = useRef(balance);
   balanceRef.current = balance;
 
+  const historyRef = useRef(history);
+  historyRef.current = history;
+
+  const pendingWinGoBets = React.useMemo(() => {
+    return history.filter((h) => h.gameId === 'color-prediction' && h.status === 'Pending');
+  }, [history]);
+
   // Sync Supabase data for the currently active logged-in user
   const performSupabaseSync = async () => {
     const currentUser = userRef.current;
@@ -334,13 +352,29 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       }
 
-      // 2. Sync bet history for this account
+      // 2. Sync bet history for this account with idempotency & deduplication
       const cloudBets = await fetchBetHistoryFromSupabase(memberId, phone);
       if (cloudBets && cloudBets.length > 0) {
-        setHistory(cloudBets);
-        try {
-          localStorage.setItem(getUserKey(phone, 'history'), JSON.stringify(cloudBets.slice(0, 60)));
-        } catch {}
+        setHistory((prev) => {
+          const map = new Map<string, GameHistoryItem>();
+          cloudBets.forEach((b) => map.set(b.id, b));
+          // Preserve local pending bets or newer settled bets
+          prev.forEach((p) => {
+            if (!map.has(p.id)) {
+              map.set(p.id, p);
+            } else if (p.status === 'Completed' && map.get(p.id)?.status === 'Pending') {
+              map.set(p.id, p);
+            }
+          });
+          const merged = Array.from(map.values())
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 100);
+          try {
+            localStorage.setItem(getUserKey(phone, 'history'), JSON.stringify(merged.slice(0, 60)));
+          } catch {}
+          historyRef.current = merged;
+          return merged;
+        });
 
         // Calculate and sync stats from history
         const totalRounds = cloudBets.length;
@@ -717,6 +751,278 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
     }
   };
+
+  // Submit a continuous WinGo bet: immediately deducts wager, creates pending record with unique ID,
+  // syncs to Supabase bet_history, and guarantees the bet is never cancelled on navigation or reload
+  const submitWinGoBet = (order: WinGoBetOrderInput): { success: boolean; betId?: string; error?: string } => {
+    if (order.amount <= 0) {
+      return { success: false, error: 'Invalid bet amount' };
+    }
+    if (balance < order.amount) {
+      return { success: false, error: 'Insufficient available points' };
+    }
+
+    const nextBalance = balance - order.amount;
+    setBalance(nextBalance);
+    balanceRef.current = nextBalance;
+    playSound('bet');
+
+    const phone = user?.phoneNumber || '9876543210';
+    const memberId = user?.memberId || 'COB8892';
+
+    if (user) {
+      try {
+        localStorage.setItem(getUserKey(phone, 'balance'), nextBalance.toString());
+      } catch {}
+      updateWalletBalanceInSupabase(memberId, phone, nextBalance);
+    }
+
+    const betId = `wingo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const pendingItem: GameHistoryItem = {
+      id: betId,
+      gameId: 'color-prediction',
+      gameTitle: `Color Prediction (Win Go ${order.duration >= 60 ? `${order.duration / 60}Min` : `${order.duration}s`})`,
+      betAmount: order.amount,
+      choice: `${order.label} [Issue ${order.period.slice(-4)}]`,
+      outcome: 'Pending Resolution',
+      payout: 0,
+      netProfit: -order.amount,
+      isWin: false,
+      timestamp: Date.now(),
+      status: 'Pending',
+      period: order.period,
+      target: String(order.target),
+      multiplier: order.multiplier,
+      duration: order.duration,
+    };
+
+    setHistory((prev) => {
+      const updated = [pendingItem, ...prev.filter((p) => p.id !== betId)].slice(0, 100);
+      historyRef.current = updated;
+      try {
+        localStorage.setItem(getUserKey(phone, 'history'), JSON.stringify(updated.slice(0, 60)));
+      } catch {}
+      return updated;
+    });
+
+    // Record in master player records
+    const playerBetItem: PlayerBetRecord = {
+      ...pendingItem,
+      memberId,
+      phoneNumber: phone,
+    };
+    setMasterPlayerBets((prev) => {
+      const updated = [playerBetItem, ...prev.filter((b) => b.id !== playerBetItem.id)].slice(0, 300);
+      try {
+        localStorage.setItem(STORAGE_KEY_MASTER_PLAYER_BETS, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // Persist pending bet immediately to Supabase
+    recordBetInSupabase(pendingItem, memberId, phone);
+
+    return { success: true, betId };
+  };
+
+  const isSettlingRef = useRef(false);
+
+  // Global continuous settlement algorithm: evaluates any pending WinGo bets whose periods have completed
+  const settleWinGoBets = async () => {
+    if (isSettlingRef.current) return;
+    isSettlingRef.current = true;
+
+    try {
+      const now = Date.now();
+      const currentHist = historyRef.current;
+      const pendingBets = currentHist.filter(
+        (h) => h.gameId === 'color-prediction' && h.status === 'Pending' && h.period
+      );
+
+      if (pendingBets.length === 0) {
+        return;
+      }
+
+      let balanceIncrement = 0;
+      let didUpdateAny = false;
+      const settledBetIds = new Set<string>();
+
+      const updatedHistory = currentHist.map((item) => {
+        if (item.gameId !== 'color-prediction' || item.status !== 'Pending' || !item.period) {
+          return item;
+        }
+
+        const dur = item.duration || 30;
+        const { roundEndTime } = parsePeriodToTimestamp(item.period, dur);
+
+        // Check if round has elapsed
+        if (now < roundEndTime) {
+          return item;
+        }
+
+        // Finalize round deterministically
+        const finalized = getFinalizedRound(item.period, dur);
+        const drawnNum = finalized.number;
+
+        let targetVal: any = item.target;
+        if (targetVal !== undefined && !isNaN(Number(targetVal))) {
+          targetVal = Number(targetVal);
+        }
+
+        const evalRes = evaluateWinGoBet(targetVal, item.betAmount, drawnNum);
+
+        didUpdateAny = true;
+        settledBetIds.add(item.id);
+        if (evalRes.isWin && evalRes.payout > 0) {
+          balanceIncrement += evalRes.payout;
+        }
+
+        const outcomeText = `Number ${drawnNum} (${finalized.bigSmall})`;
+
+        // Persist finalized game round to Supabase
+        recordGameRoundInSupabase({
+          id: `${dur}_${item.period}`,
+          duration: dur,
+          period: item.period,
+          roundIndex: finalized.roundIndex,
+          number: drawnNum,
+          color: finalized.color,
+          bigSmall: finalized.bigSmall,
+          finalizedAt: roundEndTime,
+        });
+
+        // Update bet outcome in Supabase
+        updateBetOutcomeInSupabase(
+          item.id,
+          outcomeText,
+          evalRes.payout,
+          evalRes.netProfit,
+          evalRes.isWin,
+          roundEndTime
+        );
+
+        return {
+          ...item,
+          status: 'Completed' as const,
+          outcome: outcomeText,
+          payout: evalRes.payout,
+          netProfit: evalRes.netProfit,
+          isWin: evalRes.isWin,
+          settledAt: roundEndTime,
+        };
+      });
+
+      if (didUpdateAny) {
+        setHistory(updatedHistory);
+        historyRef.current = updatedHistory;
+
+        const phone = userRef.current?.phoneNumber || '9876543210';
+        const memberId = userRef.current?.memberId || 'COB8892';
+
+        try {
+          localStorage.setItem(getUserKey(phone, 'history'), JSON.stringify(updatedHistory.slice(0, 60)));
+        } catch {}
+
+        if (balanceIncrement > 0) {
+          setBalance((prevBal) => {
+            const nextBal = prevBal + balanceIncrement;
+            balanceRef.current = nextBal;
+            try {
+              localStorage.setItem(getUserKey(phone, 'balance'), nextBal.toString());
+            } catch {}
+            if (userRef.current) {
+              updateWalletBalanceInSupabase(memberId, phone, nextBal);
+            }
+            return nextBal;
+          });
+          playSound('win');
+        }
+
+        // Update stats
+        setStats((prevStats) => {
+          let addedWins = 0;
+          let addedLosses = 0;
+          let addedWon = 0;
+          let biggestWin = prevStats.biggestWin;
+
+          updatedHistory.forEach((h) => {
+            if (settledBetIds.has(h.id)) {
+              if (h.isWin) {
+                addedWins++;
+                addedWon += h.payout;
+                if (h.payout > biggestWin) biggestWin = h.payout;
+              } else {
+                addedLosses++;
+              }
+            }
+          });
+
+          const nextStats = {
+            ...prevStats,
+            totalWins: prevStats.totalWins + addedWins,
+            totalLosses: prevStats.totalLosses + addedLosses,
+            totalWon: prevStats.totalWon + addedWon,
+            biggestWin,
+          };
+
+          try {
+            localStorage.setItem(getUserKey(phone, 'stats'), JSON.stringify(nextStats));
+          } catch {}
+          return nextStats;
+        });
+
+        // Update masterPlayerBets
+        setMasterPlayerBets((prev) => {
+          const updated = prev.map((p) => {
+            if (settledBetIds.has(p.id)) {
+              const match = updatedHistory.find((u) => u.id === p.id);
+              if (match) {
+                return {
+                  ...p,
+                  status: 'Completed' as const,
+                  outcome: match.outcome,
+                  payout: match.payout,
+                  netProfit: match.netProfit,
+                  isWin: match.isWin,
+                  settledAt: match.settledAt,
+                };
+              }
+            }
+            return p;
+          });
+          try {
+            localStorage.setItem(STORAGE_KEY_MASTER_PLAYER_BETS, JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+      }
+    } finally {
+      isSettlingRef.current = false;
+    }
+  };
+
+  // Continuous global background settlement loop: runs every 1 second
+  // Ensures any pending bets are resolved on time, even if user navigated away or refreshed
+  useEffect(() => {
+    settleWinGoBets();
+    const interval = setInterval(() => {
+      settleWinGoBets();
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Sync and settle on window visibility and focus
+  useEffect(() => {
+    const handleSync = () => {
+      settleWinGoBets();
+    };
+    window.addEventListener('visibilitychange', handleSync);
+    window.addEventListener('focus', handleSync);
+    return () => {
+      window.removeEventListener('visibilitychange', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
+  }, []);
 
   const recordGameResult = (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => {
     const fullItem: GameHistoryItem = {
@@ -1183,6 +1489,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         selectGame,
         placeBet,
         refundBet,
+        submitWinGoBet,
+        pendingWinGoBets,
+        settleWinGoBets,
         deposit,
         submitDepositRequest,
         approveDepositRequest,

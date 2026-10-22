@@ -21,7 +21,16 @@ import {
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { WinModal } from '../common/WinModal';
-import { determineWinGoOutcome, getDeterministicNumberForRound } from '../../utils/winLogic';
+import {
+  determineWinGoOutcome,
+  getDeterministicNumberForRound,
+  parsePeriodToTimestamp,
+  getFinalizedRound,
+  evaluateWinGoBet,
+  getPeriodForTime,
+  getContinuousRemainingSeconds,
+} from '../../utils/winLogic';
+import { GameHistoryItem } from '../../types';
 
 type WinGoDuration = 30 | 60 | 180 | 300;
 type BetTargetType = 'green' | 'purple' | 'red' | 'big' | 'small' | number;
@@ -114,9 +123,12 @@ export const ColorPredictionGame: React.FC = () => {
     winManagerEnabled,
     history,
     user,
+    submitWinGoBet,
+    pendingWinGoBets,
+    settleWinGoBets,
   } = useGame();
 
-  const [betOutcomeFilter, setBetOutcomeFilter] = useState<'all' | 'wins' | 'losses'>('all');
+  const [betOutcomeFilter, setBetOutcomeFilter] = useState<'all' | 'pending' | 'wins' | 'losses'>('all');
   const [betScopeFilter, setBetScopeFilter] = useState<'wingo' | 'all'>('wingo');
 
   const winManagerEnabledRef = useRef(winManagerEnabled);
@@ -133,14 +145,6 @@ export const ColorPredictionGame: React.FC = () => {
     300: createContinuousHistory(300),
   }));
 
-  // Distinct active bets for each section
-  const [activeBetsByDuration, setActiveBetsByDuration] = useState<Record<WinGoDuration, BetOrder[]>>({
-    30: [],
-    60: [],
-    180: [],
-    300: [],
-  });
-
   // Current period issue codes per duration
   const [currentPeriods, setCurrentPeriods] = useState<Record<WinGoDuration, string>>(() => ({
     30: getPeriodForTime(Date.now(), 30),
@@ -151,10 +155,6 @@ export const ColorPredictionGame: React.FC = () => {
 
   // Continuous countdown for active mode
   const [timeLeft, setTimeLeft] = useState<number>(() => getContinuousRemainingSeconds(30));
-
-  // Refs to prevent closure staleness and interval recreation
-  const activeBetsByDurationRef = useRef(activeBetsByDuration);
-  activeBetsByDurationRef.current = activeBetsByDuration;
 
   const currentPeriodsRef = useRef(currentPeriods);
   currentPeriodsRef.current = currentPeriods;
@@ -171,8 +171,14 @@ export const ColorPredictionGame: React.FC = () => {
 
   // Active section's distinct numbers, bets, and period code
   const historyList = historiesByDuration[selectedDuration] || [];
-  const activeBets = activeBetsByDuration[selectedDuration] || [];
   const currentPeriod = currentPeriods[selectedDuration] || getPeriodForTime(Date.now(), selectedDuration);
+
+  // Active bets for selected duration derived from persistent pendingWinGoBets
+  const activeBets = React.useMemo(() => {
+    return pendingWinGoBets.filter(
+      (p) => (p.duration === selectedDuration || (!p.duration && selectedDuration === 30))
+    );
+  }, [pendingWinGoBets, selectedDuration]);
 
   // Selected quick multiplier on main UI (X1, X5, etc.)
   const [uiMultiplier, setUiMultiplier] = useState<number>(1);
@@ -232,77 +238,35 @@ export const ColorPredictionGame: React.FC = () => {
     }>
   >([]);
 
-  // Unified all betting records for user's account & live session
+  // Unified, deduplicated betting records from global persistent history (saved in Supabase & localStorage)
   const allBettingRecords = React.useMemo(() => {
-    const list: Array<{
-      id: string;
-      gameId: string;
-      gameTitle: string;
-      choice: string;
-      outcome: string;
-      betAmount: number;
-      payout: number;
-      isWin: boolean;
-      timestamp: number;
-      periodLabel?: string;
-    }> = [];
+    const seen = new Set<string>();
+    const list: Array<GameHistoryItem & { periodLabel?: string }> = [];
 
-    // From global persistent account history
     history.forEach((h) => {
-      list.push({
-        id: h.id,
-        gameId: h.gameId,
-        gameTitle: h.gameTitle,
-        choice: h.choice,
-        outcome: h.outcome,
-        betAmount: h.betAmount,
-        payout: h.payout,
-        isWin: h.isWin,
-        timestamp: h.timestamp,
-        periodLabel: h.choice.includes('#') ? h.choice : `#${h.id.slice(-4)}`,
-      });
-    });
-
-    // From local session orders (if not yet in history)
-    myHistory.forEach((m, idx) => {
-      const exists = list.some(
-        (item) => item.gameId === 'color-prediction' && item.choice === m.target && item.betAmount === m.bet
-      );
-      if (!exists) {
+      if (!seen.has(h.id)) {
+        seen.add(h.id);
+        let periodLabel = h.period ? `#${h.period.slice(-4)}` : undefined;
+        if (!periodLabel && h.choice.includes('[')) {
+          const match = h.choice.match(/\[Issue\s+(\w+)\]/);
+          if (match) periodLabel = `#${match[1]}`;
+        }
         list.push({
-          id: `local-${idx}-${m.period}`,
-          gameId: 'color-prediction',
-          gameTitle: 'Win Go Color Prediction',
-          choice: m.target,
-          outcome: `Number ${m.outcomeNumber}`,
-          betAmount: m.bet,
-          payout: m.payout,
-          isWin: m.isWin,
-          timestamp: m.timestamp || Date.now() - idx * 25000,
-          periodLabel: `#${m.period.slice(-4)}`,
+          ...h,
+          periodLabel: periodLabel || `#${h.id.slice(-4)}`,
         });
       }
     });
 
     return list.sort((a, b) => b.timestamp - a.timestamp);
-  }, [history, myHistory]);
+  }, [history]);
 
   // Resolve Round logic for a specific section duration (30s, 1Min, 3Min, 5Min)
   const resolveRound = (dur: WinGoDuration) => {
-    // Evaluate active bets for this section
-    const betsToEvaluate = activeBetsByDurationRef.current[dur] || [];
+    const periodToResolve = currentPeriodsRef.current[dur];
+    const { roundIdx } = parsePeriodToTimestamp(periodToResolve, dur);
+    const drawnNumber = getDeterministicNumberForRound(roundIdx, dur);
 
-    // Continuous global deterministic number for this completed round
-    const roundIndex = Math.floor(Date.now() / (dur * 1000)) - 1;
-    const defaultDeterministicNumber = getDeterministicNumberForRound(roundIndex, dur);
-
-    // Outcome selection: follows continuous global deterministic algorithm for all users across the website
-    // If player placed active bets and Win Manager is configured, it safely determines win/loss
-    const drawnNumber = determineWinGoOutcome(
-      betsToEvaluate,
-      winManagerEnabledRef.current,
-      defaultDeterministicNumber
-    );
     const bigSmall: 'Big' | 'Small' = drawnNumber >= 5 ? 'Big' : 'Small';
 
     let colorType: 'green' | 'red' | 'purple_red' | 'purple_green';
@@ -310,8 +274,6 @@ export const ColorPredictionGame: React.FC = () => {
     else if (drawnNumber === 5) colorType = 'purple_green';
     else if ([1, 3, 7, 9].includes(drawnNumber)) colorType = 'green';
     else colorType = 'red';
-
-    const periodToResolve = currentPeriodsRef.current[dur];
 
     const periodRecord: PeriodHistory = {
       period: periodToResolve,
@@ -323,103 +285,42 @@ export const ColorPredictionGame: React.FC = () => {
     // Add drawn outcome distinctly to this specific section's history
     setHistoriesByDuration((prev) => ({
       ...prev,
-      [dur]: [periodRecord, ...(prev[dur] || []).slice(0, 19)],
+      [dur]: [periodRecord, ...(prev[dur] || []).slice(0, 29)],
     }));
 
-    if (betsToEvaluate.length > 0) {
+    // Trigger instant settlement of pending bets
+    settleWinGoBets();
+
+    // Check if user placed bets on this period to show Win/Loss modal if currently viewing this duration
+    const betsInThisPeriod = pendingWinGoBets.filter(
+      (b) => b.period === periodToResolve && (b.duration === dur || (!b.duration && dur === 30))
+    );
+
+    if (betsInThisPeriod.length > 0 && selectedDurationRef.current === dur) {
       let totalBet = 0;
       let totalPayout = 0;
 
-      betsToEvaluate.forEach((b) => {
-        totalBet += b.amount;
-        let isBetWin = false;
-        let mult = 0;
-
-        if (typeof b.target === 'number') {
-          if (b.target === drawnNumber) {
-            isBetWin = true;
-            mult = 9.0;
-          }
-        } else if (b.target === 'green') {
-          if (drawnNumber === 5) {
-            isBetWin = true;
-            mult = 1.5;
-          } else if ([1, 3, 7, 9].includes(drawnNumber)) {
-            isBetWin = true;
-            mult = 2.0;
-          }
-        } else if (b.target === 'red') {
-          if (drawnNumber === 0) {
-            isBetWin = true;
-            mult = 1.5;
-          } else if ([2, 4, 6, 8].includes(drawnNumber)) {
-            isBetWin = true;
-            mult = 2.0;
-          }
-        } else if (b.target === 'purple') {
-          if (drawnNumber === 0 || drawnNumber === 5) {
-            isBetWin = true;
-            mult = 4.5;
-          }
-        } else if (b.target === 'big') {
-          if (drawnNumber >= 5) {
-            isBetWin = true;
-            mult = 2.0;
-          }
-        } else if (b.target === 'small') {
-          if (drawnNumber <= 4) {
-            isBetWin = true;
-            mult = 2.0;
-          }
+      betsInThisPeriod.forEach((b) => {
+        totalBet += b.betAmount;
+        let targetVal: any = b.target;
+        if (targetVal !== undefined && !isNaN(Number(targetVal))) {
+          targetVal = Number(targetVal);
         }
-
-        const payout = isBetWin ? Math.round(b.amount * mult) : 0;
-        if (isBetWin) {
-          totalPayout += payout;
+        const evalRes = evaluateWinGoBet(targetVal, b.betAmount, drawnNumber);
+        if (evalRes.isWin) {
+          totalPayout += evalRes.payout;
         }
-
-        setMyHistory((prev) => [
-          {
-            period: periodToResolve,
-            target: `${b.label} (${dur >= 60 ? `${dur / 60}Min` : `${dur}s`})`,
-            bet: b.amount,
-            payout,
-            isWin: isBetWin,
-            outcomeNumber: drawnNumber,
-          },
-          ...prev.slice(0, 25),
-        ]);
-
-        recordGameResult({
-          gameId: 'color-prediction',
-          gameTitle: `Color Prediction (Win Go ${dur >= 60 ? `${dur / 60}Min` : `${dur}s`})`,
-          betAmount: b.amount,
-          choice: `${b.label} [Issue ${periodToResolve.slice(-4)}]`,
-          outcome: `Number ${drawnNumber} (${bigSmall})`,
-          payout,
-          netProfit: payout - b.amount,
-          isWin: isBetWin,
-        });
       });
 
       const hasWin = totalPayout > 0;
-      if (selectedDurationRef.current === dur || hasWin) {
-        setWinModalState({
-          isOpen: true,
-          isWin: hasWin,
-          payout: totalPayout,
-          multiplier: totalBet > 0 ? Number((totalPayout / totalBet).toFixed(2)) : 0,
-          message: `Win Go ${dur >= 60 ? `${dur / 60}Min` : `${dur}s`} #${periodToResolve.slice(-6)} resolved to Number ${drawnNumber} (${bigSmall})!`,
-          betAmount: totalBet,
-        });
-      }
-
-      // Clear active bets for this section
-      setActiveBetsByDuration((prev) => ({
-        ...prev,
-        [dur]: [],
-      }));
-      activeBetsByDurationRef.current[dur] = [];
+      setWinModalState({
+        isOpen: true,
+        isWin: hasWin,
+        payout: totalPayout,
+        multiplier: totalBet > 0 ? Number((totalPayout / totalBet).toFixed(2)) : 0,
+        message: `Win Go ${dur >= 60 ? `${dur / 60}Min` : `${dur}s`} #${periodToResolve.slice(-6)} resolved to Number ${drawnNumber} (${bigSmall})!`,
+        betAmount: totalBet,
+      });
     }
 
     // Advance period for this specific section

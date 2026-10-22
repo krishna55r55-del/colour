@@ -7,24 +7,17 @@ import {
   Copy,
   QrCode,
   ShieldCheck,
-  CreditCard,
   Building,
   Coins,
   Clock,
   Sparkles,
   AlertCircle,
-  ChevronRight,
   Upload,
   Image as ImageIcon,
   FileText,
   X,
-  Search,
-  RefreshCw,
-  Check,
-  Eye,
-  Crown,
   XCircle,
-  Filter,
+  Eye,
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { DepositRecord } from '../../types';
@@ -35,17 +28,9 @@ export const DepositView: React.FC = () => {
     user,
     depositRecords,
     submitDepositRequest,
-    approveDepositRequest,
-    rejectDepositRequest,
-    masterDepositRequests,
-    refreshMasterDeposits,
     playSound,
     setActiveView,
-    selectGame,
   } = useGame();
-
-  // Top view toggle: User Deposit recharge screen vs Admin Approval desk
-  const [activeTab, setActiveTab] = useState<'deposit' | 'admin'>('deposit');
 
   // Recharge Form State
   const [selectedMethod, setSelectedMethod] = useState<'upi' | 'paytm' | 'bank' | 'usdt'>('upi');
@@ -72,20 +57,6 @@ export const DepositView: React.FC = () => {
 
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
-  // Admin Management State
-  const [adminSearch, setAdminSearch] = useState<string>('');
-  const [adminFilter, setAdminFilter] = useState<'all' | 'pending' | 'completed' | 'rejected'>('all');
-  const [isSyncingAdmin, setIsSyncingAdmin] = useState<boolean>(false);
-  const [rejectDialog, setRejectDialog] = useState<{
-    isOpen: boolean;
-    depositId: string;
-    reason: string;
-  }>({
-    isOpen: false,
-    depositId: '',
-    reason: 'Invalid or unverified UTR number',
-  });
-
   const presetAmounts = [
     { amount: 100, bonusPercent: 0 },
     { amount: 300, bonusPercent: 0 },
@@ -109,8 +80,6 @@ export const DepositView: React.FC = () => {
   const bonusAmount = Math.round((currentAmountNum * bonusPercent) / 100);
   const totalCredited = currentAmountNum + bonusAmount;
 
-  // Pending count for notification badge
-  const pendingRequestsCount = masterDepositRequests.filter((d) => d.status === 'Pending').length;
 
   const handleSelectPreset = (val: number) => {
     playSound('click');
@@ -228,60 +197,9 @@ export const DepositView: React.FC = () => {
     }, 700);
   };
 
-  // Admin actions
-  const handleApproveDeposit = (depositId: string) => {
-    playSound('click');
-    const res = approveDepositRequest(depositId);
-    if (res.success) {
-      alert('Deposit approved! Points have been credited directly to the player account balance.');
-    } else {
-      alert(res.error || 'Failed to approve deposit.');
-    }
-  };
-
-  const handleOpenRejectDialog = (depositId: string) => {
-    playSound('click');
-    setRejectDialog({
-      isOpen: true,
-      depositId,
-      reason: 'Invalid or unverified UTR number',
-    });
-  };
-
-  const handleConfirmReject = () => {
-    playSound('click');
-    rejectDepositRequest(rejectDialog.depositId, rejectDialog.reason);
-    setRejectDialog({ isOpen: false, depositId: '', reason: '' });
-  };
-
-  const handleSyncAdmin = async () => {
-    playSound('click');
-    setIsSyncingAdmin(true);
-    await refreshMasterDeposits();
-    setTimeout(() => setIsSyncingAdmin(false), 500);
-  };
-
-  // Filtered deposits for Admin Desk
-  const filteredMasterDeposits = masterDepositRequests.filter((d) => {
-    const matchesSearch =
-      !adminSearch.trim() ||
-      (d.memberId && d.memberId.toLowerCase().includes(adminSearch.toLowerCase().trim())) ||
-      (d.phoneNumber && d.phoneNumber.includes(adminSearch.trim())) ||
-      (d.utr && d.utr.toLowerCase().includes(adminSearch.toLowerCase().trim())) ||
-      d.id.toLowerCase().includes(adminSearch.toLowerCase().trim());
-
-    const matchesFilter =
-      adminFilter === 'all' ||
-      (adminFilter === 'pending' && d.status === 'Pending') ||
-      (adminFilter === 'completed' && d.status === 'Completed') ||
-      (adminFilter === 'rejected' && d.status === 'Rejected');
-
-    return matchesSearch && matchesFilter;
-  });
-
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 pb-24 space-y-6 animate-in fade-in duration-200">
-      {/* Top Header & Tab Toggle */}
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-slate-200 shadow-xs">
         <div className="flex items-center gap-3">
           <button
@@ -298,61 +216,21 @@ export const DepositView: React.FC = () => {
 
           <div>
             <h1 className="text-base sm:text-lg font-black font-display text-slate-900 tracking-wide flex items-center gap-2">
-              <span>{activeTab === 'deposit' ? 'Recharge & Deposit Points' : 'Admin Deposit Approval Desk'}</span>
+              <span>Recharge &amp; Deposit Points</span>
             </h1>
             <p className="text-[11px] text-slate-500">
-              {activeTab === 'deposit'
-                ? 'Submit UTR and payment screenshot to request recharge points.'
-                : 'Review player deposit submissions, verify UTR/proof, and approve balance points.'}
+              Submit UTR &amp; payment screenshot. Balance points are added once approved by administrator.
             </p>
           </div>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-100 border border-slate-200 self-stretch sm:self-auto">
-          <button
-            type="button"
-            onClick={() => {
-              playSound('click');
-              setActiveTab('deposit');
-            }}
-            className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'deposit'
-                ? 'bg-rose-600 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-            }`}
-          >
+        <div className="flex items-center gap-2">
+          <div className="px-3 py-1.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1.5">
             <Wallet className="w-3.5 h-3.5" />
-            <span>Recharge</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              playSound('click');
-              setActiveTab('admin');
-            }}
-            className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'admin'
-                ? 'bg-amber-500 text-slate-950 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-            }`}
-          >
-            <Crown className="w-3.5 h-3.5 text-amber-500" />
-            <span>👑 Admin Approval</span>
-            {pendingRequestsCount > 0 && (
-              <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-black bg-rose-600 text-white animate-pulse">
-                {pendingRequestsCount}
-              </span>
-            )}
-          </button>
+            <span>Balance: ₹{balance.toLocaleString()}</span>
+          </div>
         </div>
       </div>
-
-      {/* ======================================================== */}
-      {/* TAB 1: USER DEPOSIT RECHARGE SCREEN                      */}
-      {/* ======================================================== */}
-      {activeTab === 'deposit' && (
         <div className="space-y-6">
           {/* Wallet Balance Hero Card */}
           <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-[#e52e2e] via-[#f53b3b] to-[#ff5252] text-white shadow-lg relative overflow-hidden">
@@ -842,300 +720,6 @@ export const DepositView: React.FC = () => {
             )}
           </div>
         </div>
-      )}
-
-      {/* ======================================================== */}
-      {/* TAB 2: ADMIN APPROVAL DESK (OWNER ONLY)                  */}
-      {/* ======================================================== */}
-      {activeTab === 'admin' && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          {/* Admin KPI Header Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-4 rounded-3xl bg-white border border-slate-200 shadow-xs">
-              <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">
-                Total Submissions
-              </span>
-              <div className="text-2xl font-black font-mono text-slate-900 mt-1">
-                {masterDepositRequests.length}
-              </div>
-              <span className="text-[11px] text-slate-400 mt-0.5 block">Across all players</span>
-            </div>
-
-            <div className="p-4 rounded-3xl bg-amber-50 border-2 border-amber-300 shadow-xs">
-              <span className="text-[10px] font-black uppercase text-amber-700 block tracking-wider">
-                Pending Approval
-              </span>
-              <div className="text-2xl font-black font-mono text-amber-700 mt-1">
-                {masterDepositRequests.filter((d) => d.status === 'Pending').length}
-              </div>
-              <span className="text-[11px] text-amber-600 mt-0.5 block">Action required</span>
-            </div>
-
-            <div className="p-4 rounded-3xl bg-emerald-50 border border-emerald-200 shadow-xs">
-              <span className="text-[10px] font-black uppercase text-emerald-700 block tracking-wider">
-                Total Approved
-              </span>
-              <div className="text-2xl font-black font-mono text-emerald-700 mt-1">
-                {masterDepositRequests.filter((d) => d.status === 'Completed').length}
-              </div>
-              <span className="text-[11px] text-emerald-600 mt-0.5 block">Points credited</span>
-            </div>
-
-            <div className="p-4 rounded-3xl bg-red-50 border border-red-200 shadow-xs">
-              <span className="text-[10px] font-black uppercase text-red-700 block tracking-wider">
-                Total Rejected
-              </span>
-              <div className="text-2xl font-black font-mono text-red-700 mt-1">
-                {masterDepositRequests.filter((d) => d.status === 'Rejected').length}
-              </div>
-              <span className="text-[11px] text-red-600 mt-0.5 block">Invalid UTR/proof</span>
-            </div>
-          </div>
-
-          {/* Search, Filter & Sync Control Bar */}
-          <div className="p-4 rounded-3xl bg-white border border-slate-200 shadow-xs space-y-3">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              {/* Search Bar */}
-              <div className="relative w-full sm:w-80">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={adminSearch}
-                  onChange={(e) => setAdminSearch(e.target.value)}
-                  placeholder="Search UTR, Member ID, or Phone..."
-                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white"
-                />
-              </div>
-
-              {/* Sync Cloud Button */}
-              <button
-                type="button"
-                onClick={handleSyncAdmin}
-                disabled={isSyncingAdmin}
-                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-200 disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isSyncingAdmin ? 'animate-spin' : ''}`} />
-                <span>{isSyncingAdmin ? 'Syncing...' : 'Sync Cloud Deposits'}</span>
-              </button>
-            </div>
-
-            {/* Filter Pills */}
-            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 text-xs font-bold">
-              <span className="text-[11px] font-extrabold text-slate-400 uppercase mr-1">Filter:</span>
-              <button
-                type="button"
-                onClick={() => setAdminFilter('all')}
-                className={`px-3 py-1 rounded-xl transition-all cursor-pointer ${
-                  adminFilter === 'all'
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                All ({masterDepositRequests.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setAdminFilter('pending')}
-                className={`px-3 py-1 rounded-xl transition-all cursor-pointer flex items-center gap-1 ${
-                  adminFilter === 'pending'
-                    ? 'bg-amber-500 text-slate-950 shadow-xs font-black'
-                    : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
-                }`}
-              >
-                <span>Pending Approval</span>
-                <span className="px-1.5 py-0.2 rounded-full bg-amber-200 text-amber-900 text-[10px]">
-                  {masterDepositRequests.filter((d) => d.status === 'Pending').length}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setAdminFilter('completed')}
-                className={`px-3 py-1 rounded-xl transition-all cursor-pointer ${
-                  adminFilter === 'completed'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
-                }`}
-              >
-                Approved ({masterDepositRequests.filter((d) => d.status === 'Completed').length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setAdminFilter('rejected')}
-                className={`px-3 py-1 rounded-xl transition-all cursor-pointer ${
-                  adminFilter === 'rejected'
-                    ? 'bg-red-600 text-white shadow-xs'
-                    : 'bg-red-50 text-red-800 border border-red-200 hover:bg-red-100'
-                }`}
-              >
-                Rejected ({masterDepositRequests.filter((d) => d.status === 'Rejected').length})
-              </button>
-            </div>
-          </div>
-
-          {/* Master Deposit Request Cards */}
-          {filteredMasterDeposits.length > 0 ? (
-            <div className="space-y-3">
-              {filteredMasterDeposits.map((req) => (
-                <div
-                  key={req.id}
-                  className={`p-4 rounded-3xl border transition-all shadow-xs space-y-3 ${
-                    req.status === 'Pending'
-                      ? 'bg-white border-2 border-amber-300'
-                      : req.status === 'Completed'
-                      ? 'bg-white border-slate-200'
-                      : 'bg-slate-50 border-slate-200 opacity-80'
-                  }`}
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-black text-slate-900 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200 text-xs">
-                        {req.id}
-                      </span>
-                      <span className="font-bold text-slate-800 text-xs">
-                        Member: <strong className="text-rose-600">{req.memberId || 'COB8892'}</strong>
-                      </span>
-                      {req.phoneNumber && (
-                        <span className="text-slate-500 font-mono text-xs">
-                          ({req.phoneNumber})
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-slate-400 font-mono">
-                        {new Date(req.timestamp).toLocaleString()}
-                      </span>
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                          req.status === 'Completed'
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                            : req.status === 'Rejected'
-                            ? 'bg-red-100 text-red-800 border border-red-300'
-                            : 'bg-amber-100 text-amber-800 border border-amber-300 animate-pulse'
-                        }`}
-                      >
-                        {req.status === 'Completed'
-                          ? '✅ Approved'
-                          : req.status === 'Rejected'
-                          ? '❌ Rejected'
-                          : '⏳ Pending Approval'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Details Body */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                    {/* Amount & Bonus */}
-                    <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
-                      <span className="text-[10px] font-extrabold uppercase text-slate-400 block">
-                        Recharge Amount
-                      </span>
-                      <div className="text-xl font-black font-mono text-rose-600 mt-0.5">
-                        ₹{req.totalCredit.toLocaleString()} Points
-                      </div>
-                      <span className="text-[11px] text-slate-500 mt-0.5 block">
-                        Base: ₹{req.amount} + Bonus: ₹{req.bonus}
-                      </span>
-                    </div>
-
-                    {/* UTR Verification */}
-                    <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
-                      <span className="text-[10px] font-extrabold uppercase text-slate-400 block">
-                        Submitted UTR Number
-                      </span>
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="font-mono font-black text-slate-900 text-sm select-all">
-                          {req.utr || 'N/A (Direct App)'}
-                        </span>
-                        {req.utr && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard?.writeText(req.utr!);
-                              playSound('click');
-                              alert(`UTR ${req.utr} copied to clipboard!`);
-                            }}
-                            className="text-[10px] text-slate-600 hover:text-slate-900 font-bold px-2 py-0.5 rounded bg-white border border-slate-200"
-                          >
-                            Copy
-                          </button>
-                        )}
-                      </div>
-                      <span className="text-[11px] text-slate-400 mt-0.5 block">
-                        Method: {req.method}
-                      </span>
-                    </div>
-
-                    {/* Screenshot Proof */}
-                    <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
-                      <div>
-                        <span className="text-[10px] font-extrabold uppercase text-slate-400 block">
-                          Payment Screenshot (SS)
-                        </span>
-                        <span className="text-[11px] text-slate-600 font-bold mt-1 block">
-                          {req.screenshot ? 'Screenshot Attached' : 'No screenshot file'}
-                        </span>
-                      </div>
-
-                      {req.screenshot && (
-                        <button
-                          type="button"
-                          onClick={() => setLightboxImage(req.screenshot!)}
-                          className="shrink-0 p-1 bg-white rounded-xl border border-slate-200 hover:border-rose-400 shadow-2xs group"
-                        >
-                          <img
-                            src={req.screenshot}
-                            alt="Screenshot Proof"
-                            className="w-12 h-12 object-cover rounded-lg group-hover:opacity-90"
-                          />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Rejection Reason Notice */}
-                  {req.rejectedReason && (
-                    <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold">
-                      Rejection Reason: {req.rejectedReason}
-                    </div>
-                  )}
-
-                  {/* Approval Actions (for Pending requests) */}
-                  {req.status === 'Pending' && (
-                    <div className="pt-2 flex flex-col sm:flex-row items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleApproveDeposit(req.id)}
-                        className="w-full sm:flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm uppercase tracking-wider shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98 transition-all"
-                      >
-                        <Check className="w-4 h-4 stroke-[3]" />
-                        <span>Approve &amp; Credit ₹{req.totalCredit.toLocaleString()} Points to Account</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleOpenRejectDialog(req.id)}
-                        className="w-full sm:w-auto py-3 px-4 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-                      >
-                        <X className="w-4 h-4" />
-                        <span>Reject Request</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="py-16 text-center rounded-3xl bg-white border border-slate-200 shadow-xs text-slate-400">
-              <Crown className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-              <h3 className="text-sm font-bold text-slate-700">No deposit records match your filter</h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Player deposit submissions will appear here for verification and point crediting.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* ======================================================== */}
       {/* MODAL 1: DEPOSIT REQUEST SUBMITTED CONFIRMATION MODAL    */}
@@ -1191,23 +775,11 @@ export const DepositView: React.FC = () => {
                 onClick={() => {
                   playSound('click');
                   setSubmittedModal({ isOpen: false, record: null });
-                  setActiveTab('admin');
                 }}
-                className="w-full py-3.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs uppercase tracking-wider shadow-md hover:from-amber-400 hover:to-amber-500 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                className="w-full py-3.5 rounded-full bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 text-white font-black text-xs uppercase tracking-wider shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-98"
               >
-                <Crown className="w-4 h-4 text-slate-950" />
-                <span>Go to Admin Approval Desk to Approve (Owner)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  playSound('click');
-                  setSubmittedModal({ isOpen: false, record: null });
-                }}
-                className="w-full py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
-              >
-                Close &amp; Check My Transactions
+                <CheckCircle className="w-4 h-4 text-white" />
+                <span>Done - View My Transaction Status</span>
               </button>
             </div>
           </div>
@@ -1246,67 +818,6 @@ export const DepositView: React.FC = () => {
                 alt="Payment proof screenshot"
                 className="max-h-[70vh] w-auto object-contain rounded-2xl border border-slate-800"
               />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ======================================================== */}
-      {/* MODAL 3: REJECT DEPOSIT DIALOG                           */}
-      {/* ======================================================== */}
-      {rejectDialog.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-5 border border-slate-200 shadow-2xl text-left space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <div className="flex items-center gap-2 text-red-600 font-black text-sm">
-                <XCircle className="w-5 h-5" />
-                <span>Reject Deposit Request</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setRejectDialog({ isOpen: false, depositId: '', reason: '' })}
-                className="text-slate-400 hover:text-slate-700 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-600">
-              Select or enter the reason for rejecting deposit <strong>{rejectDialog.depositId}</strong>. No points will be added to the player account.
-            </p>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-500 uppercase block">
-                Rejection Reason
-              </label>
-              <select
-                value={rejectDialog.reason}
-                onChange={(e) => setRejectDialog((prev) => ({ ...prev, reason: e.target.value }))}
-                className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-red-500"
-              >
-                <option value="Invalid or unverified UTR number">Invalid or unverified UTR number</option>
-                <option value="Screenshot proof mismatch or fake receipt">Screenshot proof mismatch or fake receipt</option>
-                <option value="Payment not received in merchant account">Payment not received in merchant account</option>
-                <option value="Amount paid does not match requested amount">Amount paid does not match requested amount</option>
-                <option value="Duplicate UTR submitted">Duplicate UTR submitted</option>
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setRejectDialog({ isOpen: false, depositId: '', reason: '' })}
-                className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmReject}
-                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-black text-xs cursor-pointer transition-colors shadow-xs"
-              >
-                Confirm Reject
-              </button>
             </div>
           </div>
         </div>
