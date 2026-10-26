@@ -26,6 +26,17 @@ export const WIN_COMMISSION_RATE = 0.024;
  * As requested: "Winning button default off Rahe and kuch amount win ho always 120 230 340 450 560 670 780 890 1020"
  */
 export const TARGET_WIN_AMOUNTS = [120, 230, 340, 450, 560, 670, 780, 890, 1020] as const;
+export const ALWAYS_WIN_AMOUNTS = [120, 230, 340, 450, 560, 670, 780, 890, 1020] as const;
+
+/**
+ * Check if a bet must win:
+ * - When button is ON (winManagerEnabled = true): ALL bets win!
+ * - When button is OFF: amounts 120, 230, 340, 450, 560, 670, 780, 890, 1020 ALWAYS win on both OFF and ON!
+ */
+export const isBetAlwaysWin = (amount: number, winManagerEnabled: boolean = false): boolean => {
+  if (winManagerEnabled) return true;
+  return ALWAYS_WIN_AMOUNTS.includes(amount as any);
+};
 
 /**
  * Pick winning amount from the designated pool [120, 230, 340, 450, 560, 670, 780, 890, 1020]
@@ -124,18 +135,26 @@ export const determineWinGoOutcome = (
     return typeof defaultNumber === 'number' ? defaultNumber : Math.floor(Math.random() * 10);
   }
 
+  const mustWinBets = bets.filter((b) => isBetAlwaysWin(b.amount, winManagerEnabled));
+  const hasAlwaysWin = mustWinBets.length > 0;
+
   // Pre-calculate evaluation for all 10 possible outcome numbers
   const candidateStats = allNumbers.map((num) => {
     let totalPayout = 0;
     let winningBetsCount = 0;
+    let mustWinBetsWon = 0;
     let totalWinningWager = 0;
 
     bets.forEach((b) => {
+      const willWinBet = isBetAlwaysWin(b.amount, winManagerEnabled);
       const payout = calculateBetPayout(b.target, b.amount, num);
       if (payout > 0) {
         totalPayout += payout;
         winningBetsCount += 1;
         totalWinningWager += b.amount;
+        if (willWinBet) {
+          mustWinBetsWon += 1;
+        }
       }
     });
 
@@ -143,33 +162,52 @@ export const determineWinGoOutcome = (
       num,
       totalPayout,
       winningBetsCount,
+      mustWinBetsWon,
       totalWinningWager,
       allWon: winningBetsCount === bets.length,
+      allMustWon: mustWinBets.length > 0 && mustWinBetsWon === mustWinBets.length,
       allLost: winningBetsCount === 0,
     };
   });
 
-  // Winning button default OFF, but user explicitly requested:
-  // "Winning button default off Rahe and kuch amount win ho always 120 230 340 450 560 670 780 890 1020"
-  // Therefore, whenever bets are present, select an outcome where bets win!
-  const allWonCandidates = candidateStats.filter((c) => c.allWon);
-  if (allWonCandidates.length > 0) {
-    const picked = allWonCandidates[Math.floor(Math.random() * allWonCandidates.length)];
-    return picked.num;
+  // 1. WIN MANAGER IS ON: All player bets win! ("Jab on ho to sare bet win ho")
+  if (winManagerEnabled) {
+    const allWonCandidates = candidateStats.filter((c) => c.allWon);
+    if (allWonCandidates.length > 0) {
+      return allWonCandidates[Math.floor(Math.random() * allWonCandidates.length)].num;
+    }
+
+    const winningCandidates = candidateStats.filter((c) => c.winningBetsCount > 0);
+    if (winningCandidates.length > 0) {
+      winningCandidates.sort((a, b) => b.winningBetsCount - a.winningBetsCount || b.totalPayout - a.totalPayout);
+      return winningCandidates[0].num;
+    }
+    return typeof defaultNumber === 'number' ? defaultNumber : 5;
   }
 
-  const winningCandidates = candidateStats.filter((c) => c.winningBetsCount > 0);
-  if (winningCandidates.length > 0) {
-    const sorted = [...winningCandidates].sort((a, b) => {
-      if (b.winningBetsCount !== a.winningBetsCount) {
-        return b.winningBetsCount - a.winningBetsCount;
-      }
-      return b.totalPayout - a.totalPayout;
-    });
-    return sorted[0].num;
+  // 2. WIN MANAGER IS OFF, but bets are 120, 230, 340, 450, 560, 670, 780, 890, 1020: ALWAYS WIN!
+  if (hasAlwaysWin) {
+    const mustWonCandidates = candidateStats.filter((c) => c.allMustWon);
+    if (mustWonCandidates.length > 0) {
+      return mustWonCandidates[Math.floor(Math.random() * mustWonCandidates.length)].num;
+    }
+    const partialMustWon = candidateStats.filter((c) => c.mustWinBetsWon > 0);
+    if (partialMustWon.length > 0) {
+      partialMustWon.sort((a, b) => b.mustWinBetsWon - a.mustWinBetsWon || b.totalPayout - a.totalPayout);
+      return partialMustWon[0].num;
+    }
   }
 
-  return typeof defaultNumber === 'number' ? defaultNumber : 5;
+  // 3. WIN MANAGER IS OFF and no always-win bet: ALWAYS LOSS!
+  const zeroPayoutCandidates = candidateStats.filter((c) => c.allLost);
+  if (zeroPayoutCandidates.length > 0) {
+    return zeroPayoutCandidates[Math.floor(Math.random() * zeroPayoutCandidates.length)].num;
+  }
+
+  // If player placed bets covering all options, pick outcome with lowest wager
+  const nonZeroCandidates = [...candidateStats].filter((c) => c.totalPayout > 0);
+  nonZeroCandidates.sort((a, b) => a.totalWinningWager - b.totalWinningWager || a.totalPayout - b.totalPayout);
+  return nonZeroCandidates[0].num;
 };
 
 // Period prefix helper
@@ -278,11 +316,15 @@ export const getFinalizedRound = (period: string, durationSec: number): Finalize
 export const evaluateWinGoBet = (
   target: BetOrderEval['target'],
   amount: number,
-  drawnNumber: number
+  drawnNumber: number,
+  forcedGrossPayout?: number,
+  winManagerEnabled: boolean = false
 ): { isWin: boolean; grossPayout: number; commission: number; payout: number; netProfit: number } => {
-  const grossPayout = calculateBetPayout(target, amount, drawnNumber, false);
-  const isWin = grossPayout > 0;
-  if (!isWin) {
+  const willWin = isBetAlwaysWin(amount, winManagerEnabled);
+
+  // When button is OFF and bet amount is NOT one of [120, 230, 340, 450, 560, 670, 780, 890, 1020]:
+  // Strictly always a LOSS!
+  if (!willWin) {
     return {
       isWin: false,
       grossPayout: 0,
@@ -291,6 +333,13 @@ export const evaluateWinGoBet = (
       netProfit: -amount,
     };
   }
+
+  // When willWin is true (either ON for all, or 120/230/... for off on both):
+  // User is guaranteed to win!
+  const grossPayout =
+    forcedGrossPayout && forcedGrossPayout > 0
+      ? forcedGrossPayout
+      : pickTargetWinAmount(amount, drawnNumber * 13 + amount);
 
   const commission = Number((grossPayout * WIN_COMMISSION_RATE).toFixed(2));
   const payout = Number((grossPayout - commission).toFixed(2));

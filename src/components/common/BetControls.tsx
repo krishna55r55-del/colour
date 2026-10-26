@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Coins, Minus, Plus } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 
@@ -18,6 +18,33 @@ export const BetControls: React.FC<BetControlsProps> = ({
   maxBet = 10000,
 }) => {
   const { balance, playSound } = useGame();
+
+  const [typedValue, setTypedValue] = useState<string>(betAmount.toString());
+
+  useEffect(() => {
+    setTypedValue(betAmount.toString());
+  }, [betAmount]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value.replace(/\D/g, '');
+    setTypedValue(raw);
+    const parsed = parseInt(raw, 10);
+    if (!isNaN(parsed)) {
+      setBetAmount(parsed);
+    }
+  };
+
+  const handleInputBlur = () => {
+    const parsed = parseInt(typedValue, 10);
+    if (isNaN(parsed) || parsed < minBet) {
+      setBetAmount(minBet);
+      setTypedValue(minBet.toString());
+    } else if (parsed > Math.min(balance, maxBet)) {
+      const clamped = Math.min(balance, maxBet);
+      setBetAmount(clamped);
+      setTypedValue(clamped.toString());
+    }
+  };
 
   const presets = [10, 25, 50, 100, 250, 500];
 
@@ -52,9 +79,9 @@ export const BetControls: React.FC<BetControlsProps> = ({
   return (
     <div className="w-full bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 shadow-xs">
       <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
-        <span className="flex items-center gap-1.5 font-bold">
+        <span className="flex items-center gap-1.5 font-bold text-slate-700">
           <Coins className="w-3.5 h-3.5 text-rose-500" />
-          <span>Wager Amount</span>
+          <span>Wager Amount (Type or Select)</span>
         </span>
         <span className="tabular-nums">
           Avail: <strong className="text-slate-900 font-bold font-mono">₹{balance.toLocaleString()}</strong>
@@ -74,19 +101,14 @@ export const BetControls: React.FC<BetControlsProps> = ({
 
         <div className="relative flex-1">
           <input
-            type="number"
-            min={minBet}
-            max={Math.min(balance, maxBet)}
-            step={5}
-            value={betAmount}
+            type="text"
+            inputMode="numeric"
+            value={typedValue}
             disabled={disabled}
-            onChange={(e) => {
-              const val = parseInt(e.target.value, 10);
-              if (!isNaN(val)) {
-                setBetAmount(Math.max(0, val));
-              }
-            }}
-            className="w-full h-10 bg-slate-50 border border-slate-200 focus:border-rose-500 rounded-xl px-3 text-center text-base sm:text-lg font-bold text-slate-900 focus:outline-none tabular-nums transition-colors"
+            placeholder="Type amount"
+            onChange={handleInputChange}
+            onBlur={handleInputBlur}
+            className="w-full h-10 bg-slate-50 border border-slate-200 focus:border-rose-500 focus:bg-white rounded-xl px-3 text-center text-base sm:text-lg font-black text-slate-900 focus:outline-none tabular-nums transition-colors"
           />
         </div>
 

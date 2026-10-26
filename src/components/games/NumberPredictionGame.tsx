@@ -4,11 +4,12 @@ import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
+import { isBetAlwaysWin } from '../../utils/winLogic';
 
 type HiLoChoice = 'higher' | 'lower' | 'equal';
 
 export const NumberPredictionGame: React.FC = () => {
-  const { placeBet, recordGameResult, playSound } = useGame();
+  const { placeBet, recordGameResult, playSound, winManagerEnabled } = useGame();
 
   const [betAmount, setBetAmount] = useState(50);
   const [baseNumber, setBaseNumber] = useState<number>(50);
@@ -57,7 +58,29 @@ export const NumberPredictionGame: React.FC = () => {
 
     setTimeout(() => {
       clearInterval(interval);
-      const drawn = Math.floor(Math.random() * 100) + 1;
+      let drawn = Math.floor(Math.random() * 100) + 1;
+
+      const willWin = isBetAlwaysWin(betAmount, winManagerEnabled);
+      if (willWin) {
+        // Force win
+        if (selectedChoice === 'higher') {
+          drawn = Math.min(100, baseNumber + Math.floor(Math.random() * 15) + 1);
+        } else if (selectedChoice === 'lower') {
+          drawn = Math.max(1, baseNumber - Math.floor(Math.random() * 15) - 1);
+        } else {
+          drawn = baseNumber;
+        }
+      } else {
+        // Force loss ("Always loss in any game when the button is offf")
+        if (selectedChoice === 'higher') {
+          drawn = Math.max(1, baseNumber - Math.floor(Math.random() * 10) - 1);
+        } else if (selectedChoice === 'lower') {
+          drawn = Math.min(100, baseNumber + Math.floor(Math.random() * 10) + 1);
+        } else {
+          drawn = (baseNumber + 7) % 100 + 1;
+        }
+      }
+
       setNextNumber(drawn);
       setIsRevealing(false);
 

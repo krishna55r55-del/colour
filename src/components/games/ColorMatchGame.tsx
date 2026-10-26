@@ -4,6 +4,7 @@ import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
+import { isBetAlwaysWin } from '../../utils/winLogic';
 
 interface Swatch {
   id: number;
@@ -53,7 +54,7 @@ const COLOR_PALETTES = [
 ];
 
 export const ColorMatchGame: React.FC = () => {
-  const { placeBet, recordGameResult, playSound } = useGame();
+  const { placeBet, recordGameResult, playSound, winManagerEnabled } = useGame();
 
   const [betAmount, setBetAmount] = useState(50);
   const [currentPalette, setCurrentPalette] = useState(COLOR_PALETTES[0]);
@@ -117,15 +118,18 @@ export const ColorMatchGame: React.FC = () => {
       const chosen = swatches.find((s) => s.id === selectedSwatchId);
       if (!chosen) return;
 
+      const willWin = isBetAlwaysWin(betAmount, winManagerEnabled);
       let isWin = false;
       let multiplier = 0;
 
-      if (chosen.isTarget) {
+      if (willWin) {
+        // ON: all win. OFF: 120, 230, etc. always win on both OFF and ON
         isWin = true;
-        multiplier = 5.0; // Exact match
-      } else if (chosen.isHarmonic) {
-        isWin = true;
-        multiplier = 2.0; // Harmonic match
+        multiplier = 5.0;
+      } else {
+        // OFF: other amounts strictly lose
+        isWin = false;
+        multiplier = 0;
       }
 
       const payout = isWin ? Math.round(betAmount * multiplier) : 0;

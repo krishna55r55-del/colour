@@ -4,6 +4,7 @@ import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
+import { isBetAlwaysWin } from '../../utils/winLogic';
 
 interface MemoryCard {
   id: number;
@@ -22,7 +23,7 @@ const SYMBOLS = [
 ];
 
 export const MemoryMatchGame: React.FC = () => {
-  const { placeBet, recordGameResult, playSound } = useGame();
+  const { placeBet, recordGameResult, playSound, winManagerEnabled } = useGame();
 
   const [betAmount, setBetAmount] = useState(50);
   const [cards, setCards] = useState<MemoryCard[]>([]);
@@ -73,6 +74,30 @@ export const MemoryMatchGame: React.FC = () => {
     playSound('card');
   };
 
+  const handleDefeat = (finalFlips: number) => {
+    setIsPlaying(false);
+    playSound('loss');
+
+    recordGameResult({
+      gameId: 'memory-match',
+      gameTitle: 'Memory Match',
+      betAmount,
+      choice: 'Memory Grid Challenge',
+      outcome: `Failed at ${finalFlips} Turns`,
+      payout: 0,
+      netProfit: -betAmount,
+      isWin: false,
+    });
+
+    setModalState({
+      isOpen: true,
+      isWin: false,
+      payout: 0,
+      multiplier: 0,
+      message: '❌ Turn limit exceeded! Better luck next round.',
+    });
+  };
+
   const handleCardClick = (cardId: number) => {
     if (!isPlaying) return;
     if (flippedCards.length === 2) return; // Wait for flip resolution
@@ -95,10 +120,21 @@ export const MemoryMatchGame: React.FC = () => {
 
     // If 2 cards flipped, check match
     if (newFlipped.length === 2) {
-      setFlipsUsed((prev) => prev + 1);
+      const currentFlips = flipsUsed + 1;
+      setFlipsUsed(currentFlips);
 
       const firstCard = cards.find((c) => c.id === newFlipped[0]);
       const secondCard = clickedCard;
+
+      const willWin = isBetAlwaysWin(betAmount, winManagerEnabled);
+
+      // When willWin is false: Always loss
+      if (!willWin && currentFlips >= 8) {
+        setTimeout(() => {
+          handleDefeat(currentFlips);
+        }, 600);
+        return;
+      }
 
       if (firstCard && firstCard.iconName === secondCard.iconName) {
         // Matched!
@@ -116,9 +152,13 @@ export const MemoryMatchGame: React.FC = () => {
           const nextMatched = matchedPairs + 1;
           setMatchedPairs(nextMatched);
 
-          // All 6 pairs found: VICTORY!
+          // All 6 pairs found:
           if (nextMatched === 6) {
-            handleVictory(flipsUsed + 1);
+            if (!willWin) {
+              handleDefeat(currentFlips);
+            } else {
+              handleVictory(currentFlips);
+            }
           }
         }, 500);
       } else {
@@ -140,11 +180,12 @@ export const MemoryMatchGame: React.FC = () => {
   const handleVictory = (finalFlips: number) => {
     setIsPlaying(false);
 
+    if (!isBetAlwaysWin(betAmount, winManagerEnabled)) {
+      handleDefeat(finalFlips);
+      return;
+    }
+
     // Multiplier calculation based on efficiency
-    // Perfect game is 6 flips (3.5x payout)
-    // 7-9 flips: 2.5x
-    // 10-12 flips: 1.8x
-    // 13+ flips: 1.2x
     let multiplier = 1.2;
     if (finalFlips <= 7) {
       multiplier = 3.5;
@@ -195,8 +236,8 @@ export const MemoryMatchGame: React.FC = () => {
             <span className="font-bold text-emerald-400 tabular-nums">{matchedPairs} / 6</span>
           </div>
           <div className="flex items-center gap-2">
-            <span>Turns Used:</span>
-            <span className="font-bold text-white tabular-nums">{flipsUsed}</span>
+            <span>Turns:</span>
+            <span className="font-bold text-white tabular-nums">{flipsUsed} / 8 Max</span>
           </div>
           <div className="flex items-center gap-1.5 text-purple-400 font-semibold">
             <span>Max Return:</span>

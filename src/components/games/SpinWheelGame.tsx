@@ -4,6 +4,7 @@ import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
+import { isBetAlwaysWin } from '../../utils/winLogic';
 
 interface Segment {
   label: string;
@@ -28,7 +29,7 @@ const SEGMENTS: Segment[] = [
 ];
 
 export const SpinWheelGame: React.FC = () => {
-  const { placeBet, recordGameResult, playSound } = useGame();
+  const { placeBet, recordGameResult, playSound, winManagerEnabled } = useGame();
 
   const [betAmount, setBetAmount] = useState(50);
   const [isSpinning, setIsSpinning] = useState(false);
@@ -58,8 +59,16 @@ export const SpinWheelGame: React.FC = () => {
 
     setIsSpinning(true);
 
-    // Pick random target segment index
-    const targetIndex = Math.floor(Math.random() * numSegments);
+    // When button is ON: Always win. When button is OFF: amounts 120, 230, etc. always win (both OFF/ON); other amounts lose (0.0x)
+    let targetIndex = Math.floor(Math.random() * numSegments);
+    const willWin = isBetAlwaysWin(betAmount, winManagerEnabled);
+    if (!willWin) {
+      const losingIndices = [2, 5]; // 0.0x multiplier segments
+      targetIndex = losingIndices[Math.floor(Math.random() * losingIndices.length)];
+    } else {
+      const winningIndices = [1, 4, 6, 7]; // 3.0x, 5.0x, 2.5x, 10.0x segments
+      targetIndex = winningIndices[Math.floor(Math.random() * winningIndices.length)];
+    }
     const targetSegment = SEGMENTS[targetIndex];
 
     // Pointer is at the top (270 degrees in standard circle math, or 0/top)

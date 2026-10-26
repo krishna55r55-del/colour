@@ -611,6 +611,7 @@ export const WithdrawView: React.FC = () => {
             <p>1. Withdrawals are processed 24/7 via automated banking gateway.</p>
             <p>2. Please verify your Account Number and IFSC Code carefully to avoid bank rejection.</p>
             <p>3. Funds typically reflect in your bank account within 2–15 minutes.</p>
+            <p>4. Daily withdrawal limit (₹50,000 max / ₹200 min) resets every night at 12:00 AM (00:00 Midnight).</p>
           </div>
         </div>
       )}

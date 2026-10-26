@@ -4,6 +4,7 @@ import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
+import { isBetAlwaysWin } from '../../utils/winLogic';
 
 type DiceMode = 'one' | 'two';
 type TwoDiceChoice = 'under7' | 'exact7' | 'over7' | 'doubles';
@@ -82,7 +83,8 @@ export const DiceRollGame: React.FC = () => {
       let final1 = Math.floor(Math.random() * 6) + 1;
       let final2 = Math.floor(Math.random() * 6) + 1;
 
-      if (winManagerEnabled) {
+      const willWin = isBetAlwaysWin(betAmount, winManagerEnabled);
+      if (willWin) {
         // Force win
         if (mode === 'two') {
           if (twoChoice === 'under7') {

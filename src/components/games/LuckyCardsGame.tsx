@@ -4,6 +4,7 @@ import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
+import { isBetAlwaysWin } from '../../utils/winLogic';
 
 interface MysteryCard {
   id: number;
@@ -15,7 +16,7 @@ interface MysteryCard {
 const POSSIBLE_MULTIPLIERS = [0.5, 1.2, 2.0, 4.0, 10.0];
 
 export const LuckyCardsGame: React.FC = () => {
-  const { placeBet, recordGameResult, playSound } = useGame();
+  const { placeBet, recordGameResult, playSound, winManagerEnabled } = useGame();
 
   const [betAmount, setBetAmount] = useState(50);
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null);
@@ -62,14 +63,40 @@ export const LuckyCardsGame: React.FC = () => {
   const handlePickCard = (card: MysteryCard) => {
     if (!isPlaying || isRevealed) return;
 
+    // Enforce win/loss based on button state & target amounts: "Jab on ho to sare bet win ho or off to to 120 230 340 450 560 670 780 890 1020 is time ko always win kro off on both"
+    const willWin = isBetAlwaysWin(betAmount, winManagerEnabled);
+    let resolvedMultiplier = card.multiplier;
+    let resolvedLabel = card.label;
+    let resolvedJackpot = card.isJackpot;
+
+    if (!willWin) {
+      resolvedMultiplier = 0.0;
+      resolvedLabel = '0.0x';
+      resolvedJackpot = false;
+    } else {
+      resolvedMultiplier = Math.max(2.0, card.multiplier);
+      resolvedLabel = `${resolvedMultiplier.toFixed(1)}x`;
+    }
+
+    const resolvedCard = {
+      ...card,
+      multiplier: resolvedMultiplier,
+      label: resolvedLabel,
+      isJackpot: resolvedJackpot,
+    };
+
+    setCards((prev) =>
+      prev.map((c) => (c.id === card.id ? resolvedCard : c))
+    );
+
     setSelectedCardId(card.id);
     setIsRevealed(true);
     setIsPlaying(false);
     playSound('card');
 
     setTimeout(() => {
-      const isWin = card.multiplier >= 1.0;
-      const payout = Math.round(betAmount * card.multiplier);
+      const isWin = willWin && resolvedCard.multiplier >= 1.0;
+      const payout = isWin ? Math.round(betAmount * resolvedCard.multiplier) : 0;
 
       recordGameResult({
         gameId: 'lucky-cards',

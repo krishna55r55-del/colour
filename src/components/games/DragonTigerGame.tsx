@@ -4,6 +4,7 @@ import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
+import { isBetAlwaysWin } from '../../utils/winLogic';
 
 type BetOption = 'dragon' | 'tiger' | 'tie';
 
@@ -68,8 +69,9 @@ export const DragonTigerGame: React.FC = () => {
       let dCard = getRandomCard();
       let tCard = getRandomCard();
 
-      if (winManagerEnabled) {
-        // Win Manager ON: player bet wins
+      const willWin = isBetAlwaysWin(betAmount, winManagerEnabled);
+      if (willWin) {
+        // Win: player bet wins
         if (selectedBet === 'dragon') {
           while (dCard.rank <= tCard.rank) {
             dCard = getRandomCard();

@@ -20,9 +20,9 @@ export const AuthPage: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'signin' | 'register' | 'forgot'>('signin');
 
-  // Sign In Form State
-  const [signInNumber, setSignInNumber] = useState('9876543210');
-  const [signInPassword, setSignInPassword] = useState('password123');
+  // Sign In Form State: empty by default (no default login)
+  const [signInNumber, setSignInNumber] = useState('');
+  const [signInPassword, setSignInPassword] = useState('');
   const [showSignInPassword, setShowSignInPassword] = useState(false);
 
   // Register Form State
@@ -35,7 +35,7 @@ export const AuthPage: React.FC = () => {
   const [agreeTerms, setAgreeTerms] = useState(true);
 
   // Forgot Password Form State (OTP based)
-  const [forgotNumber, setForgotNumber] = useState('9876543210');
+  const [forgotNumber, setForgotNumber] = useState('');
   const [forgotOtp, setForgotOtp] = useState('');
   const [forgotNewPassword, setForgotNewPassword] = useState('');
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
@@ -304,7 +304,7 @@ export const AuthPage: React.FC = () => {
                     type="button"
                     onClick={() => {
                       playSound('click');
-                      setForgotNumber(signInNumber || '9876543210');
+                      setForgotNumber(signInNumber || '');
                       setActiveTab('forgot');
                       setErrorMessage(null);
                       setOtpSuccessMessage(null);
@@ -362,18 +362,6 @@ export const AuthPage: React.FC = () => {
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
-              </button>
-
-              {/* Instant Preview Login */}
-              <button
-                type="button"
-                onClick={() => {
-                  playSound('click');
-                  login('9876543210', 'password123');
-                }}
-                className="w-full py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <span>Instant Enter / Preview Website</span>
               </button>
             </form>
           )}

@@ -166,6 +166,7 @@ export const ColorPredictionGame: React.FC = () => {
     themeColor: 'green' | 'purple' | 'red' | 'yellow' | 'blue';
     baseUnit: number; // 1, 10, 100, 1000
     quantity: number;
+    customWagerInput: string;
   }>({
     isOpen: false,
     target: null,
@@ -174,6 +175,7 @@ export const ColorPredictionGame: React.FC = () => {
     themeColor: 'green',
     baseUnit: 10,
     quantity: 1,
+    customWagerInput: '10',
   });
 
   // How to play modal
@@ -288,7 +290,7 @@ export const ColorPredictionGame: React.FC = () => {
         if (targetVal !== undefined && !isNaN(Number(targetVal))) {
           targetVal = Number(targetVal);
         }
-        const evalRes = evaluateWinGoBet(targetVal, b.betAmount, drawnNumber);
+        const evalRes = evaluateWinGoBet(targetVal, b.betAmount, drawnNumber, undefined, winManagerEnabledRef.current);
         if (evalRes.isWin) {
           totalPayout += evalRes.payout;
         }
@@ -436,6 +438,7 @@ export const ColorPredictionGame: React.FC = () => {
       themeColor,
       baseUnit: 10,
       quantity: uiMultiplier,
+      customWagerInput: (10 * uiMultiplier).toString(),
     });
   };
 
@@ -449,7 +452,10 @@ export const ColorPredictionGame: React.FC = () => {
   // Confirm bet in modal: permanently saved to GameContext & Supabase
   const handleConfirmBet = () => {
     if (!betModal.target) return;
-    const totalWager = betModal.baseUnit * betModal.quantity;
+    const typed = parseInt(betModal.customWagerInput, 10);
+    const totalWager = !isNaN(typed) && typed > 0
+      ? typed
+      : betModal.baseUnit * betModal.quantity;
 
     if (totalWager <= 0 || balance < totalWager) {
       alert('Insufficient available points. Please use Deposit to recharge free credits.');
@@ -1368,6 +1374,49 @@ export const ColorPredictionGame: React.FC = () => {
             </div>
 
             <div className="p-4 space-y-4 text-xs">
+              {/* Keyboard Input for Wager Amount */}
+              <div>
+                <label className="block text-slate-700 font-bold mb-1.5 uppercase text-[10px] tracking-wider flex items-center justify-between">
+                  <span>Wager Amount (Type with Keyboard)</span>
+                  <span className="text-[10px] text-slate-400 font-mono font-medium">
+                    Avail: ₹{balance.toLocaleString()}
+                  </span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-mono font-bold text-sm">
+                    ₹
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="Type bet amount"
+                    value={betModal.customWagerInput}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\D/g, '');
+                      const parsed = parseInt(raw, 10);
+                      setBetModal((prev) => ({
+                        ...prev,
+                        customWagerInput: raw,
+                        baseUnit: !isNaN(parsed) && parsed > 0 ? parsed : 0,
+                        quantity: 1,
+                      }));
+                    }}
+                    onBlur={() => {
+                      const parsed = parseInt(betModal.customWagerInput, 10);
+                      if (isNaN(parsed) || parsed <= 0) {
+                        setBetModal((prev) => ({
+                          ...prev,
+                          customWagerInput: '10',
+                          baseUnit: 10,
+                          quantity: 1,
+                        }));
+                      }
+                    }}
+                    className="w-full pl-8 pr-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-rose-500 font-mono font-black text-base text-slate-900 focus:outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
               {/* Contract Unit Selection */}
               <div>
                 <label className="block text-slate-600 font-bold mb-2 uppercase text-[10px] tracking-wider">
@@ -1380,9 +1429,14 @@ export const ColorPredictionGame: React.FC = () => {
                       type="button"
                       onClick={() => {
                         playSound('click');
-                        setBetModal((prev) => ({ ...prev, baseUnit: unit }));
+                        const total = unit * betModal.quantity;
+                        setBetModal((prev) => ({
+                          ...prev,
+                          baseUnit: unit,
+                          customWagerInput: total.toString(),
+                        }));
                       }}
-                      className={`py-2 rounded-xl font-bold border transition-all ${
+                      className={`py-2 rounded-xl font-bold border transition-all cursor-pointer ${
                         betModal.baseUnit === unit
                           ? 'bg-rose-500 text-white border-rose-600 shadow-sm'
                           : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
@@ -1404,22 +1458,47 @@ export const ColorPredictionGame: React.FC = () => {
                     type="button"
                     onClick={() => {
                       playSound('click');
-                      setBetModal((prev) => ({ ...prev, quantity: Math.max(1, prev.quantity - 1) }));
+                      const newQty = Math.max(1, betModal.quantity - 1);
+                      const total = betModal.baseUnit * newQty;
+                      setBetModal((prev) => ({
+                        ...prev,
+                        quantity: newQty,
+                        customWagerInput: total.toString(),
+                      }));
                     }}
                     className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center border border-slate-200 cursor-pointer"
                   >
                     <Minus className="w-4 h-4" />
                   </button>
 
-                  <div className="flex-1 h-10 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center font-black text-lg font-mono text-slate-900 tabular-nums">
-                    {betModal.quantity}
-                  </div>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={betModal.quantity}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\D/g, '');
+                      const q = Math.max(1, parseInt(raw, 10) || 1);
+                      const total = betModal.baseUnit * q;
+                      setBetModal((prev) => ({
+                        ...prev,
+                        quantity: q,
+                        customWagerInput: total.toString(),
+                      }));
+                    }}
+                    className="flex-1 h-10 bg-slate-50 border border-slate-200 rounded-xl text-center font-black text-lg font-mono text-slate-900 tabular-nums focus:outline-none focus:border-rose-500 focus:bg-white"
+                  />
 
                   <button
                     type="button"
                     onClick={() => {
                       playSound('click');
-                      setBetModal((prev) => ({ ...prev, quantity: prev.quantity + 1 }));
+                      const newQty = betModal.quantity + 1;
+                      const total = betModal.baseUnit * newQty;
+                      setBetModal((prev) => ({
+                        ...prev,
+                        quantity: newQty,
+                        customWagerInput: total.toString(),
+                      }));
                     }}
                     className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center border border-slate-200 cursor-pointer"
                   >
@@ -1435,9 +1514,14 @@ export const ColorPredictionGame: React.FC = () => {
                       type="button"
                       onClick={() => {
                         playSound('click');
-                        setBetModal((prev) => ({ ...prev, quantity: m }));
+                        const total = betModal.baseUnit * m;
+                        setBetModal((prev) => ({
+                          ...prev,
+                          quantity: m,
+                          customWagerInput: total.toString(),
+                        }));
                       }}
-                      className={`py-1.5 rounded-lg font-bold text-xs border ${
+                      className={`py-1.5 rounded-lg font-bold text-xs border cursor-pointer ${
                         betModal.quantity === m
                           ? 'bg-rose-500 text-white border-rose-600'
                           : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
@@ -1454,7 +1538,7 @@ export const ColorPredictionGame: React.FC = () => {
                 <div className="flex items-center justify-between font-semibold">
                   <span className="text-slate-600 font-bold">Total Order Wager:</span>
                   <span className="text-base font-black text-rose-600 font-mono tabular-nums">
-                    ₹{(betModal.baseUnit * betModal.quantity).toLocaleString()}
+                    ₹{(parseInt(betModal.customWagerInput, 10) || betModal.baseUnit * betModal.quantity).toLocaleString()}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-200/60 font-medium">

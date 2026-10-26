@@ -186,13 +186,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
-  // Current logged in user
+  // Current logged in user: strictly null by default (no automatic default login)
   const [user, setUser] = useState<UserProfile | null>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_AUTH);
-      return saved ? JSON.parse(saved) : defaultUserProfile;
+      return saved ? JSON.parse(saved) : null;
     } catch {
-      return defaultUserProfile;
+      return null;
     }
   });
 
@@ -975,7 +975,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           targetVal = Number(targetVal);
         }
 
-        const evalRes = evaluateWinGoBet(targetVal, item.betAmount, drawnNum);
+        const evalRes = evaluateWinGoBet(targetVal, item.betAmount, drawnNum, undefined, winManagerEnabled);
 
         didUpdateAny = true;
         settledBetIds.add(item.id);

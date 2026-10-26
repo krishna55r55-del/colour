@@ -4,6 +4,7 @@ import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
+import { isBetAlwaysWin } from '../../utils/winLogic';
 
 type CoinSide = 'heads' | 'tails';
 
@@ -47,7 +48,8 @@ export const CoinFlipGame: React.FC = () => {
     setTimeout(() => playSound('tick'), 600);
 
     setTimeout(() => {
-      const outcome: CoinSide = winManagerEnabled
+      const willWin = isBetAlwaysWin(betAmount, winManagerEnabled);
+      const outcome: CoinSide = willWin
         ? selectedSide
         : (selectedSide === 'heads' ? 'tails' : 'heads');
       setCoinResult(outcome);

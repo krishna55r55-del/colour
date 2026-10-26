@@ -4,11 +4,12 @@ import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
+import { isBetAlwaysWin } from '../../utils/winLogic';
 
 type BetType = 'single' | 'odd_even' | 'range';
 
 export const LuckyNumberGame: React.FC = () => {
-  const { placeBet, recordGameResult, playSound } = useGame();
+  const { placeBet, recordGameResult, playSound, winManagerEnabled } = useGame();
 
   const [betAmount, setBetAmount] = useState(50);
   const [betType, setBetType] = useState<BetType>('single');
@@ -49,7 +50,29 @@ export const LuckyNumberGame: React.FC = () => {
 
     setTimeout(() => {
       clearInterval(interval);
-      const finalNumber = Math.floor(Math.random() * 10);
+      let finalNumber = Math.floor(Math.random() * 10);
+
+      const willWin = isBetAlwaysWin(betAmount, winManagerEnabled);
+      if (willWin) {
+        // Force win
+        if (betType === 'single') {
+          finalNumber = selectedDigit;
+        } else if (betType === 'odd_even') {
+          finalNumber = selectedOddEven === 'odd' ? 7 : 4;
+        } else if (betType === 'range') {
+          finalNumber = selectedRange === 'low' ? 2 : 8;
+        }
+      } else {
+        // Force loss ("Always loss in any game when the button is offf")
+        if (betType === 'single') {
+          finalNumber = (selectedDigit + 1) % 10;
+        } else if (betType === 'odd_even') {
+          finalNumber = selectedOddEven === 'odd' ? 4 : 7;
+        } else if (betType === 'range') {
+          finalNumber = selectedRange === 'low' ? 7 : 2;
+        }
+      }
+
       setDrawnNumber(finalNumber);
       setRecentDrawn((prev) => [finalNumber, ...prev.slice(0, 9)]);
       setIsDrawing(false);
