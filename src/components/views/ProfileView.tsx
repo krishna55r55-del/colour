@@ -5,7 +5,6 @@ import {
   Trophy,
   Coins,
   Gift,
-  RotateCcw,
   Volume2,
   VolumeX,
   Award,
@@ -27,7 +26,6 @@ export const ProfileView: React.FC = () => {
     stats,
     soundEnabled,
     toggleSound,
-    resetBalance,
     playSound,
     user,
     logout,
@@ -95,13 +93,6 @@ export const ProfileView: React.FC = () => {
 
   const rank = getRank(stats.totalRounds);
   const winRate = stats.totalRounds > 0 ? Math.round((stats.totalWins / stats.totalRounds) * 100) : 0;
-
-  const handleReset = () => {
-    playSound('click');
-    if (window.confirm('Reset virtual balance back to 1,000?')) {
-      resetBalance();
-    }
-  };
 
   const handleToggleClick = () => {
     playSound('click');
@@ -252,16 +243,6 @@ export const ProfileView: React.FC = () => {
             className="flex-1 sm:flex-initial px-5 py-2.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-orange-500 text-white text-xs font-black flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer active:scale-95"
           >
             <span>Withdraw</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleReset}
-            className="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black flex items-center justify-center gap-1.5 transition-colors border border-slate-200 cursor-pointer active:scale-95"
-            title="Restore default starting balance of 1,000"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
-            <span>Reset</span>
           </button>
         </div>
       </div>

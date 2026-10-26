@@ -89,7 +89,6 @@ export const ColorPredictionGame: React.FC = () => {
     placeBet,
     recordGameResult,
     playSound,
-    resetBalance,
     selectGame,
     setActiveView,
     winManagerEnabled,

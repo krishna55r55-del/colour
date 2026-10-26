@@ -66,6 +66,13 @@ interface GameContextType {
   refreshFromSupabase: () => Promise<void>;
   login: (phoneNumber: string, password: string) => { success: boolean; error?: string };
   register: (phoneNumber: string, password: string, confirmPassword: string) => { success: boolean; error?: string };
+  sendPasswordResetOtp: (phoneNumber: string) => { success: boolean; otp?: string; error?: string };
+  resetPasswordWithOtp: (
+    phoneNumber: string,
+    otp: string,
+    newPassword: string,
+    confirmPassword: string
+  ) => { success: boolean; error?: string };
   logout: () => void;
   toggleSound: () => void;
   setActiveView: (view: ViewType) => void;
@@ -700,6 +707,93 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Create profile in Supabase
     updateWalletBalanceInSupabase(newMemberId, cleanedPhone, INITIAL_BALANCE);
 
+    return { success: true };
+  };
+
+  const otpStoreRef = useRef<Record<string, { otp: string; expiresAt: number }>>({});
+
+  const sendPasswordResetOtp = (phoneNumber: string): { success: boolean; otp?: string; error?: string } => {
+    const cleanedPhone = phoneNumber.trim().replace(/\D/g, '');
+    if (cleanedPhone.length < 10) {
+      return { success: false, error: 'Please enter a valid 10-digit mobile number' };
+    }
+
+    const matched = accounts.find((a) => a.phoneNumber === cleanedPhone);
+    if (!matched) {
+      return { success: false, error: 'No account found with this mobile number. Please check the number or register.' };
+    }
+
+    // Generate authentic 6-digit OTP
+    const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes validity
+
+    otpStoreRef.current[cleanedPhone] = {
+      otp: generatedOtp,
+      expiresAt,
+    };
+
+    playSound('tick');
+    return { success: true, otp: generatedOtp };
+  };
+
+  const resetPasswordWithOtp = (
+    phoneNumber: string,
+    otp: string,
+    newPassword: string,
+    confirmPassword: string
+  ): { success: boolean; error?: string } => {
+    const cleanedPhone = phoneNumber.trim().replace(/\D/g, '');
+    if (cleanedPhone.length < 10) {
+      return { success: false, error: 'Please enter a valid 10-digit mobile number' };
+    }
+
+    const storedData = otpStoreRef.current[cleanedPhone];
+    if (!storedData) {
+      return { success: false, error: 'Please request an OTP first by clicking "Send OTP"' };
+    }
+
+    if (Date.now() > storedData.expiresAt) {
+      return { success: false, error: 'OTP has expired. Please request a new OTP' };
+    }
+
+    if (storedData.otp !== otp.trim()) {
+      return { success: false, error: 'Invalid OTP code. Please enter the correct 6-digit code' };
+    }
+
+    if (newPassword.length < 6) {
+      return { success: false, error: 'New password must be at least 6 characters long' };
+    }
+
+    if (newPassword !== confirmPassword) {
+      return { success: false, error: 'New password and confirm password do not match' };
+    }
+
+    // Update account in accounts list
+    let updated = false;
+    const updatedAccounts = accounts.map((a) => {
+      if (a.phoneNumber === cleanedPhone) {
+        updated = true;
+        return {
+          ...a,
+          passwordHash: newPassword,
+        };
+      }
+      return a;
+    });
+
+    if (!updated) {
+      return { success: false, error: 'Account not found' };
+    }
+
+    setAccounts(updatedAccounts);
+    try {
+      localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(updatedAccounts));
+    } catch {}
+
+    // Invalidate used OTP
+    delete otpStoreRef.current[cleanedPhone];
+
+    playSound('win');
     return { success: true };
   };
 
@@ -1511,6 +1605,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshFromSupabase: performSupabaseSync,
         login,
         register,
+        sendPasswordResetOtp,
+        resetPasswordWithOtp,
         logout,
         toggleSound,
         setActiveView,
