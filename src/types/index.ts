@@ -43,6 +43,7 @@ export interface GameHistoryItem {
   target?: string;
   multiplier?: number;
   duration?: number;
+  commission?: number;
   settledAt?: number;
 }
 

@@ -80,15 +80,21 @@ export const WinModal: React.FC<WinModalProps> = ({
           )}
           <div className="h-px bg-slate-200 my-1" />
           <div className="flex justify-between items-center text-sm font-bold">
-            <span className="text-slate-700">Total Return</span>
+            <span className="text-slate-700">Total Payout</span>
             <span className={`tabular-nums ${isWin ? 'text-emerald-600 text-lg font-black font-mono' : 'text-slate-400'}`}>
               {payout > 0 ? `+₹${payout.toLocaleString()}` : '0'}
             </span>
           </div>
           {isWin && (
-            <div className="text-[11px] text-emerald-600 font-bold text-right">
-              Net Profit: +₹{netProfit.toLocaleString()}
-            </div>
+            <>
+              <div className="flex justify-between items-center text-[11px] text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200/70">
+                <span>Fee (2.4% Commission)</span>
+                <span className="font-bold font-mono">-₹{(payout > 0 ? (payout / 0.976) * 0.024 : 0).toFixed(2)}</span>
+              </div>
+              <div className="text-[11px] text-emerald-600 font-bold text-right">
+                Net Profit: +₹{netProfit.toLocaleString()}
+              </div>
+            </>
           )}
         </div>
 

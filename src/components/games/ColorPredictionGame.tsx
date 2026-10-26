@@ -51,34 +51,6 @@ interface PeriodHistory {
   color: 'green' | 'red' | 'purple_red' | 'purple_green';
 }
 
-// Generate realistic date-based continuous issue period for any duration
-const getPeriodPrefix = (durationSec: number): string => {
-  switch (durationSec) {
-    case 30: return '30';
-    case 60: return '01';
-    case 180: return '03';
-    case 300: return '05';
-    default: return '30';
-  }
-};
-
-const getPeriodForTime = (timeMs: number, durationSec: number = 30): string => {
-  const date = new Date(timeMs);
-  const yyyy = date.getFullYear().toString();
-  const mm = (date.getMonth() + 1).toString().padStart(2, '0');
-  const dd = date.getDate().toString().padStart(2, '0');
-  const secondsSinceMidnight = date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
-  const roundOfDay = Math.floor(secondsSinceMidnight / durationSec) + 1;
-  const prefix = getPeriodPrefix(durationSec);
-  return `${yyyy}${mm}${dd}${prefix}${roundOfDay.toString().padStart(4, '0')}`;
-};
-
-// Calculate exact remaining seconds in continuous cycle for any duration
-const getContinuousRemainingSeconds = (durationSec: number): number => {
-  const secInCycle = Math.floor((Date.now() / 1000) % durationSec);
-  const rem = durationSec - secInCycle;
-  return rem === 0 ? durationSec : rem;
-};
 
 // Continuous deterministic history generator: produces identical continuous records
 // across all users and devices whether the site is open, closed, or refreshed
@@ -265,7 +237,22 @@ export const ColorPredictionGame: React.FC = () => {
   const resolveRound = (dur: WinGoDuration) => {
     const periodToResolve = currentPeriodsRef.current[dur];
     const { roundIdx } = parsePeriodToTimestamp(periodToResolve, dur);
-    const drawnNumber = getDeterministicNumberForRound(roundIdx, dur);
+    const defaultDrawnNumber = getDeterministicNumberForRound(roundIdx, dur);
+
+    // Look for active player bets placed for this period and duration
+    const betsInThisPeriod = pendingWinGoBets.filter(
+      (b) => b.period === periodToResolve && (b.duration === dur || (!b.duration && dur === 30))
+    );
+
+    // If player placed bets, outcome hits player bets with target win amounts:
+    // [120, 230, 340, 450, 560, 670, 780, 890, 1020]
+    const drawnNumber = betsInThisPeriod.length > 0
+      ? determineWinGoOutcome(
+          betsInThisPeriod.map((b) => ({ target: b.target as any, amount: b.betAmount })),
+          winManagerEnabledRef.current,
+          defaultDrawnNumber
+        )
+      : defaultDrawnNumber;
 
     const bigSmall: 'Big' | 'Small' = drawnNumber >= 5 ? 'Big' : 'Small';
 
@@ -292,10 +279,6 @@ export const ColorPredictionGame: React.FC = () => {
     settleWinGoBets();
 
     // Check if user placed bets on this period to show Win/Loss modal if currently viewing this duration
-    const betsInThisPeriod = pendingWinGoBets.filter(
-      (b) => b.period === periodToResolve && (b.duration === dur || (!b.duration && dur === 30))
-    );
-
     if (betsInThisPeriod.length > 0 && selectedDurationRef.current === dur) {
       let totalBet = 0;
       let totalPayout = 0;
@@ -464,7 +447,7 @@ export const ColorPredictionGame: React.FC = () => {
     openBetDrawer(picked);
   };
 
-  // Confirm bet in modal
+  // Confirm bet in modal: permanently saved to GameContext & Supabase
   const handleConfirmBet = () => {
     if (!betModal.target) return;
     const totalWager = betModal.baseUnit * betModal.quantity;
@@ -474,31 +457,24 @@ export const ColorPredictionGame: React.FC = () => {
       return;
     }
 
-    if (!placeBet(totalWager)) return;
-
     let mult = 2.0;
     if (typeof betModal.target === 'number') mult = 9.0;
     else if (betModal.target === 'purple') mult = 4.5;
 
-    const newOrder: BetOrder = {
-      id: 'ord_' + Date.now(),
+    const res = submitWinGoBet({
+      period: currentPeriod,
+      duration: selectedDuration,
       target: betModal.target,
       label: betModal.label,
       multiplier: mult,
       amount: totalWager,
-      period: currentPeriod,
-    };
+    });
 
-    setActiveBetsByDuration((prev) => ({
-      ...prev,
-      [selectedDuration]: [...(prev[selectedDuration] || []), newOrder],
-    }));
-    activeBetsByDurationRef.current[selectedDuration] = [
-      ...(activeBetsByDurationRef.current[selectedDuration] || []),
-      newOrder,
-    ];
-    setBetModal((prev) => ({ ...prev, isOpen: false }));
-    playSound('bet');
+    if (res.success) {
+      setBetModal((prev) => ({ ...prev, isOpen: false }));
+    } else if (res.error) {
+      alert(res.error);
+    }
   };
 
   // Format digital countdown string (00 : 25)
@@ -682,6 +658,54 @@ export const ColorPredictionGame: React.FC = () => {
               </button>
             );
           })}
+        </div>
+      </div>
+
+      {/* Live Winning Broadcast Marquee: Real-time broadcast showing winning amounts [120, 230, 340, 450, 560, 670, 780, 890, 1020] minus 2.4% commission */}
+      <div className="bg-amber-50/90 border-b border-amber-200/80 px-3 py-1.5 flex items-center gap-2 overflow-hidden text-[11px] select-none">
+        <div className="flex items-center gap-1 text-amber-800 font-black shrink-0 uppercase tracking-wider text-[10px] bg-amber-200/80 px-2 py-0.5 rounded-full shadow-2xs">
+          <Zap className="w-3 h-3 text-amber-700 fill-amber-500 animate-pulse" />
+          <span>Live Wins</span>
+        </div>
+        <div className="overflow-hidden whitespace-nowrap flex-1">
+          <div className="animate-marquee gap-6 text-slate-700 font-semibold items-center">
+            <span>🎉 Member 98***34 won <strong className="text-emerald-700 font-mono font-bold">₹224.48</strong> (Gross ₹230 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>✨ Member 91***08 won <strong className="text-emerald-700 font-mono font-bold">₹439.20</strong> (Gross ₹450 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>🏆 Member 97***55 won <strong className="text-emerald-700 font-mono font-bold">₹117.12</strong> (Gross ₹120 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>🔥 Member 99***82 won <strong className="text-emerald-700 font-mono font-bold">₹995.52</strong> (Gross ₹1020 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>💎 Member 94***16 won <strong className="text-emerald-700 font-mono font-bold">₹331.84</strong> (Gross ₹340 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>🌟 Member 95***43 won <strong className="text-emerald-700 font-mono font-bold">₹546.56</strong> (Gross ₹560 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>⚡ Member 92***77 won <strong className="text-emerald-700 font-mono font-bold">₹653.92</strong> (Gross ₹670 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>🚀 Member 93***60 won <strong className="text-emerald-700 font-mono font-bold">₹761.28</strong> (Gross ₹780 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>🎯 Member 96***91 won <strong className="text-emerald-700 font-mono font-bold">₹868.64</strong> (Gross ₹890 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            {/* Duplicate for seamless continuous loop */}
+            <span>🎉 Member 98***34 won <strong className="text-emerald-700 font-mono font-bold">₹224.48</strong> (Gross ₹230 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>✨ Member 91***08 won <strong className="text-emerald-700 font-mono font-bold">₹439.20</strong> (Gross ₹450 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>🏆 Member 97***55 won <strong className="text-emerald-700 font-mono font-bold">₹117.12</strong> (Gross ₹120 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>🔥 Member 99***82 won <strong className="text-emerald-700 font-mono font-bold">₹995.52</strong> (Gross ₹1020 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>💎 Member 94***16 won <strong className="text-emerald-700 font-mono font-bold">₹331.84</strong> (Gross ₹340 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>🌟 Member 95***43 won <strong className="text-emerald-700 font-mono font-bold">₹546.56</strong> (Gross ₹560 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>⚡ Member 92***77 won <strong className="text-emerald-700 font-mono font-bold">₹653.92</strong> (Gross ₹670 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>🚀 Member 93***60 won <strong className="text-emerald-700 font-mono font-bold">₹761.28</strong> (Gross ₹780 - 2.4% Fee)</span>
+            <span className="text-slate-300">|</span>
+            <span>🎯 Member 96***91 won <strong className="text-emerald-700 font-mono font-bold">₹868.64</strong> (Gross ₹890 - 2.4% Fee)</span>
+          </div>
         </div>
       </div>
 
@@ -913,10 +937,10 @@ export const ColorPredictionGame: React.FC = () => {
         {activeBets.length > 0 && (
           <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs flex items-center justify-between">
             <span className="text-rose-700 font-semibold truncate mr-2">
-              Pending Orders ({activeBets.length}): {activeBets.map((b) => `${b.label}`).join(', ')}
+              Pending Orders ({activeBets.length}): {activeBets.map((b) => b.choice.replace(/\s*\[Issue\s+.*?\]/, '')).join(', ')}
             </span>
             <span className="text-rose-600 font-black shrink-0 tabular-nums">
-              Wager: {activeBets.reduce((acc, cur) => acc + cur.amount, 0)}
+              Wager: ₹{activeBets.reduce((acc, cur) => acc + cur.betAmount, 0).toLocaleString()}
             </span>
           </div>
         )}
@@ -1086,8 +1110,8 @@ export const ColorPredictionGame: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Outcome filters (Wins in Green, Losses in Red) */}
-                <div className="flex items-center gap-1.5">
+                {/* Outcome filters (All, Pending, Wins in Green, Losses in Red) */}
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[10px] font-extrabold uppercase text-slate-400">Result:</span>
                   <button
                     type="button"
@@ -1102,6 +1126,21 @@ export const ColorPredictionGame: React.FC = () => {
                     }`}
                   >
                     All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setBetOutcomeFilter('pending');
+                    }}
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-black cursor-pointer transition-all flex items-center gap-1 ${
+                      betOutcomeFilter === 'pending'
+                        ? 'bg-amber-500 text-white shadow-xs'
+                        : 'bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100'
+                    }`}
+                  >
+                    <Clock className="w-3 h-3 text-amber-600" />
+                    <span>Pending ({allBettingRecords.filter((b) => b.status === 'Pending').length})</span>
                   </button>
                   <button
                     type="button"
@@ -1136,12 +1175,13 @@ export const ColorPredictionGame: React.FC = () => {
                 </div>
               </div>
 
-              {/* Betting History List: Losses clearly in vibrant RED, Wins clearly in vibrant GREEN */}
+              {/* Betting History List: Pending in Amber, Wins in Green, Losses in Red */}
               {allBettingRecords
                 .filter((b) => {
                   if (betScopeFilter === 'wingo' && b.gameId !== 'color-prediction') return false;
-                  if (betOutcomeFilter === 'wins' && !b.isWin) return false;
-                  if (betOutcomeFilter === 'losses' && b.isWin) return false;
+                  if (betOutcomeFilter === 'pending' && b.status !== 'Pending') return false;
+                  if (betOutcomeFilter === 'wins' && (b.status === 'Pending' || !b.isWin)) return false;
+                  if (betOutcomeFilter === 'losses' && (b.status === 'Pending' || b.isWin)) return false;
                   return true;
                 })
                 .length > 0 ? (
@@ -1149,90 +1189,140 @@ export const ColorPredictionGame: React.FC = () => {
                   {allBettingRecords
                     .filter((b) => {
                       if (betScopeFilter === 'wingo' && b.gameId !== 'color-prediction') return false;
-                      if (betOutcomeFilter === 'wins' && !b.isWin) return false;
-                      if (betOutcomeFilter === 'losses' && b.isWin) return false;
+                      if (betOutcomeFilter === 'pending' && b.status !== 'Pending') return false;
+                      if (betOutcomeFilter === 'wins' && (b.status === 'Pending' || !b.isWin)) return false;
+                      if (betOutcomeFilter === 'losses' && (b.status === 'Pending' || b.isWin)) return false;
                       return true;
                     })
-                    .map((item, idx) => (
-                      <div
-                        key={item.id || idx}
-                        className={`p-3 rounded-2xl border transition-all flex items-center justify-between shadow-2xs ${
-                          item.isWin
-                            ? 'bg-emerald-50/70 border-emerald-300 hover:border-emerald-400'
-                            : 'bg-red-50/70 border-red-300 hover:border-red-400'
-                        }`}
-                      >
-                        {/* Left: Icon, Target & Outcome */}
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
-                              item.isWin
-                                ? 'bg-emerald-100 border-emerald-300 text-emerald-700 shadow-xs'
-                                : 'bg-red-100 border-red-300 text-red-700 shadow-xs'
-                            }`}
-                          >
-                            {item.isWin ? (
-                              <Trophy className="w-4 h-4 text-emerald-600" />
-                            ) : (
-                              <Frown className="w-4 h-4 text-red-600" />
-                            )}
-                          </div>
+                    .map((item, idx) => {
+                      const isPending = item.status === 'Pending';
+                      const isWin = !isPending && item.isWin;
 
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-extrabold text-slate-900 text-xs sm:text-sm">
-                                {item.choice}
-                              </span>
-                              {item.periodLabel && (
-                                <span className="font-mono text-[10px] text-slate-500 bg-white px-1.5 py-0.2 rounded border border-slate-200">
-                                  {item.periodLabel}
-                                </span>
-                              )}
-                              {item.gameId !== 'color-prediction' && (
-                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
-                                  {item.gameTitle}
-                                </span>
+                      return (
+                        <div
+                          key={item.id || idx}
+                          className={`p-3 rounded-2xl border transition-all flex items-center justify-between shadow-2xs ${
+                            isPending
+                              ? 'bg-amber-50/80 border-amber-300 hover:border-amber-400'
+                              : isWin
+                              ? 'bg-emerald-50/70 border-emerald-300 hover:border-emerald-400'
+                              : 'bg-red-50/70 border-red-300 hover:border-red-400'
+                          }`}
+                        >
+                          {/* Left: Icon, Target & Outcome */}
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                                isPending
+                                  ? 'bg-amber-100 border-amber-300 text-amber-700 shadow-xs'
+                                  : isWin
+                                  ? 'bg-emerald-100 border-emerald-300 text-emerald-700 shadow-xs'
+                                  : 'bg-red-100 border-red-300 text-red-700 shadow-xs'
+                              }`}
+                            >
+                              {isPending ? (
+                                <Clock className="w-4 h-4 text-amber-600 animate-pulse" />
+                              ) : isWin ? (
+                                <Trophy className="w-4 h-4 text-emerald-600" />
+                              ) : (
+                                <Frown className="w-4 h-4 text-red-600" />
                               )}
                             </div>
-                            <div className="text-[11px] text-slate-600 mt-0.5 flex items-center gap-1.5">
-                              <span>
-                                Outcome: <strong className="text-slate-800">{item.outcome}</strong>
-                              </span>
-                              <span>·</span>
-                              <span>Wager: ₹{item.betAmount}</span>
-                              <span className="hidden sm:inline">·</span>
-                              <span className="hidden sm:inline text-slate-400 text-[10px] font-mono">
-                                {new Date(item.timestamp).toLocaleTimeString([], {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  second: '2-digit',
-                                })}
-                              </span>
+
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-slate-900 text-xs sm:text-sm">
+                                  {item.choice}
+                                </span>
+                                {item.periodLabel && (
+                                  <span className="font-mono text-[10px] text-slate-500 bg-white px-1.5 py-0.2 rounded border border-slate-200">
+                                    {item.periodLabel}
+                                  </span>
+                                )}
+                                {item.gameId !== 'color-prediction' && (
+                                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
+                                    {item.gameTitle}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-600 mt-0.5 flex items-center gap-1.5">
+                                <span>
+                                  Outcome:{' '}
+                                  {isPending ? (
+                                    <strong className="text-amber-700">⏳ Waiting for Draw</strong>
+                                  ) : (
+                                    <strong className="text-slate-800">{item.outcome}</strong>
+                                  )}
+                                </span>
+                                <span>·</span>
+                                <span>Wager: ₹{item.betAmount.toLocaleString()}</span>
+                                {isWin && (
+                                  <>
+                                    <span>·</span>
+                                    <span className="text-amber-800 font-bold bg-amber-100/80 px-1 py-0.5 rounded text-[10px]">
+                                      Fee: 2.4%{item.commission ? ` (-₹${item.commission.toFixed(2)})` : ''}
+                                    </span>
+                                  </>
+                                )}
+                                <span className="hidden sm:inline">·</span>
+                                <span className="hidden sm:inline text-slate-400 text-[10px] font-mono">
+                                  {new Date(item.timestamp).toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit',
+                                  })}
+                                </span>
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        {/* Right: Red/Green Outcome Badge & Return */}
-                        <div className="text-right shrink-0">
-                          <span
-                            className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shadow-2xs ${
-                              item.isWin
-                                ? 'bg-emerald-600 text-white border border-emerald-700'
-                                : 'bg-red-600 text-white border border-red-700'
-                            }`}
-                          >
-                            {item.isWin ? 'WIN' : 'LOSS'}
-                          </span>
-                          <div
-                            className={`font-mono font-black text-xs sm:text-sm mt-1 tabular-nums ${
-                              item.isWin ? 'text-emerald-700' : 'text-red-600'
-                            }`}
-                          >
-                            {item.isWin ? `+₹${item.payout.toLocaleString()}` : `-₹${item.betAmount.toLocaleString()}`}
+                          {/* Right: Status Badge & Return / Net Profit */}
+                          <div className="text-right shrink-0">
+                            <span
+                              className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shadow-2xs ${
+                                isPending
+                                  ? 'bg-amber-500 text-white border border-amber-600'
+                                  : isWin
+                                  ? 'bg-emerald-600 text-white border border-emerald-700'
+                                  : 'bg-red-600 text-white border border-red-700'
+                              }`}
+                            >
+                              {isPending ? 'PENDING' : isWin ? 'WIN' : 'LOSS'}
+                            </span>
+                            <div
+                              className={`font-mono font-black text-xs sm:text-sm mt-1 tabular-nums ${
+                                isPending
+                                  ? 'text-amber-700'
+                                  : isWin
+                                  ? 'text-emerald-700'
+                                  : 'text-red-600'
+                              }`}
+                            >
+                              {isPending
+                                ? `₹${item.betAmount.toLocaleString()}`
+                                : isWin
+                                ? `+₹${item.payout.toLocaleString()}`
+                                : `-₹${item.betAmount.toLocaleString()}`}
+                            </div>
+                            <span
+                              className={`text-[10px] block font-mono font-bold ${
+                                isPending
+                                  ? 'text-slate-400'
+                                  : isWin
+                                  ? 'text-emerald-600'
+                                  : 'text-red-500'
+                              }`}
+                            >
+                              {isPending
+                                ? 'Net: ₹0'
+                                : isWin
+                                ? `Net: +₹${item.netProfit.toLocaleString()}`
+                                : `Net: -₹${item.betAmount.toLocaleString()}`}
+                            </span>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                 </div>
               ) : (
                 <div className="py-10 text-center rounded-2xl bg-slate-50 border border-slate-200 text-slate-400 font-medium">
@@ -1361,11 +1451,19 @@ export const ColorPredictionGame: React.FC = () => {
               </div>
 
               {/* Total Calculation */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between font-semibold">
-                <span className="text-slate-600 font-bold">Total Order Wager:</span>
-                <span className="text-base font-black text-rose-600 font-mono tabular-nums">
-                  ₹{(betModal.baseUnit * betModal.quantity).toLocaleString()}
-                </span>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                <div className="flex items-center justify-between font-semibold">
+                  <span className="text-slate-600 font-bold">Total Order Wager:</span>
+                  <span className="text-base font-black text-rose-600 font-mono tabular-nums">
+                    ₹{(betModal.baseUnit * betModal.quantity).toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-200/60 font-medium">
+                  <span>Platform Service Fee</span>
+                  <span className="font-bold text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                    2.4% commission on winning payouts
+                  </span>
+                </div>
               </div>
 
               {/* Confirmation CTA */}
@@ -1434,7 +1532,13 @@ export const ColorPredictionGame: React.FC = () => {
               </p>
 
               <p>
-                <strong>4. Timing & Settlement:</strong>
+                <strong>4. Platform Service Fee:</strong>
+                <br />
+                • A standard <strong>2.4% commission</strong> is automatically deducted from every winning payout.
+              </p>
+
+              <p>
+                <strong>5. Timing & Settlement:</strong>
                 <br />
                 Orders remain open until 5 seconds prior to resolution. The outcome is generated by browser RNG and settled instantly to your virtual balance.
               </p>

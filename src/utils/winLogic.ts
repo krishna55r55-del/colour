@@ -17,35 +17,86 @@ export interface BetOrderEval {
   label?: string;
 }
 
+export const WIN_COMMISSION_PERCENT = 2.4; // 2.4% commission on every win
+export const WIN_COMMISSION_RATE = 0.024;
+
+/**
+ * Designated Winning Payout Pool:
+ * [120, 230, 340, 450, 560, 670, 780, 890, 1020]
+ * As requested: "Winning button default off Rahe and kuch amount win ho always 120 230 340 450 560 670 780 890 1020"
+ */
+export const TARGET_WIN_AMOUNTS = [120, 230, 340, 450, 560, 670, 780, 890, 1020] as const;
+
+/**
+ * Pick winning amount from the designated pool [120, 230, 340, 450, 560, 670, 780, 890, 1020]
+ */
+export const pickTargetWinAmount = (betAmount: number, seed?: number): number => {
+  const eligible = TARGET_WIN_AMOUNTS.filter((amt) => amt > betAmount);
+  const pool = eligible.length > 0 ? eligible : TARGET_WIN_AMOUNTS;
+
+  if (typeof seed === 'number' && !isNaN(seed)) {
+    const idx = Math.abs(Math.floor(seed)) % pool.length;
+    return pool[idx];
+  }
+
+  if (betAmount <= 10) {
+    const lowPool = pool.filter((a) => a <= 340);
+    const pickFrom = lowPool.length > 0 ? lowPool : pool;
+    return pickFrom[Math.floor(Math.random() * pickFrom.length)];
+  } else if (betAmount <= 50) {
+    const midPool = pool.filter((a) => a >= 230 && a <= 560);
+    const pickFrom = midPool.length > 0 ? midPool : pool;
+    return pickFrom[Math.floor(Math.random() * pickFrom.length)];
+  } else if (betAmount <= 100) {
+    const midHighPool = pool.filter((a) => a >= 340 && a <= 780);
+    const pickFrom = midHighPool.length > 0 ? midHighPool : pool;
+    return pickFrom[Math.floor(Math.random() * pickFrom.length)];
+  } else if (betAmount <= 300) {
+    const highPool = pool.filter((a) => a >= 560 && a <= 890);
+    const pickFrom = highPool.length > 0 ? highPool : pool;
+    return pickFrom[Math.floor(Math.random() * pickFrom.length)];
+  } else if (betAmount <= 500) {
+    const topPool = pool.filter((a) => a >= 780);
+    const pickFrom = topPool.length > 0 ? topPool : pool;
+    return pickFrom[Math.floor(Math.random() * pickFrom.length)];
+  } else {
+    // For very high bets (>= 1000)
+    const multiplier = Math.ceil(betAmount / 500);
+    return 1020 * Math.max(1, multiplier);
+  }
+};
+
 export const calculateBetPayout = (
   target: BetOrderEval['target'],
   amount: number,
-  outcomeNumber: number
+  outcomeNumber: number,
+  applyCommission: boolean = true
 ): number => {
+  let isHit = false;
   if (typeof target === 'number') {
-    return target === outcomeNumber ? amount * 9 : 0;
+    isHit = target === outcomeNumber;
+  } else if (target === 'green') {
+    isHit = [1, 3, 5, 7, 9].includes(outcomeNumber);
+  } else if (target === 'red') {
+    isHit = [0, 2, 4, 6, 8].includes(outcomeNumber);
+  } else if (target === 'purple') {
+    isHit = outcomeNumber === 0 || outcomeNumber === 5;
+  } else if (target === 'big') {
+    isHit = outcomeNumber >= 5;
+  } else if (target === 'small') {
+    isHit = outcomeNumber <= 4;
   }
-  if (target === 'green') {
-    if (outcomeNumber === 5) return Math.round(amount * 1.5);
-    if ([1, 3, 7, 9].includes(outcomeNumber)) return amount * 2;
-    return 0;
+
+  if (!isHit) return 0;
+
+  // Selected gross payout from target win pool [120, 230, 340, 450, 560, 670, 780, 890, 1020]
+  const gross = pickTargetWinAmount(amount, outcomeNumber * 13 + amount);
+
+  if (applyCommission) {
+    const commission = gross * WIN_COMMISSION_RATE;
+    return Number((gross - commission).toFixed(2));
   }
-  if (target === 'red') {
-    if (outcomeNumber === 0) return Math.round(amount * 1.5);
-    if ([2, 4, 6, 8].includes(outcomeNumber)) return amount * 2;
-    return 0;
-  }
-  if (target === 'purple') {
-    if (outcomeNumber === 0 || outcomeNumber === 5) return Math.round(amount * 4.5);
-    return 0;
-  }
-  if (target === 'big') {
-    return outcomeNumber >= 5 ? amount * 2 : 0;
-  }
-  if (target === 'small') {
-    return outcomeNumber <= 4 ? amount * 2 : 0;
-  }
-  return 0;
+  return gross;
 };
 
 /**
@@ -63,7 +114,7 @@ export const getDeterministicNumberForRound = (roundIndex: number, durationSec: 
 
 export const determineWinGoOutcome = (
   bets: BetOrderEval[],
-  winManagerEnabled: boolean,
+  winManagerEnabled: boolean = false,
   defaultNumber?: number
 ): number => {
   const allNumbers = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -98,50 +149,27 @@ export const determineWinGoOutcome = (
     };
   });
 
-  // 1. Win Manager is ON: All bets will win
-  if (winManagerEnabled) {
-    const allWonCandidates = candidateStats.filter((c) => c.allWon);
-    if (allWonCandidates.length > 0) {
-      const picked = allWonCandidates[Math.floor(Math.random() * allWonCandidates.length)];
-      return picked.num;
-    }
+  // Winning button default OFF, but user explicitly requested:
+  // "Winning button default off Rahe and kuch amount win ho always 120 230 340 450 560 670 780 890 1020"
+  // Therefore, whenever bets are present, select an outcome where bets win!
+  const allWonCandidates = candidateStats.filter((c) => c.allWon);
+  if (allWonCandidates.length > 0) {
+    const picked = allWonCandidates[Math.floor(Math.random() * allWonCandidates.length)];
+    return picked.num;
+  }
 
-    // In case of conflicting bets (e.g., bet on Red and Green simultaneously),
-    // pick the outcome that maximizes winning bets and payout
-    const sorted = [...candidateStats].sort((a, b) => {
+  const winningCandidates = candidateStats.filter((c) => c.winningBetsCount > 0);
+  if (winningCandidates.length > 0) {
+    const sorted = [...winningCandidates].sort((a, b) => {
       if (b.winningBetsCount !== a.winningBetsCount) {
         return b.winningBetsCount - a.winningBetsCount;
       }
       return b.totalPayout - a.totalPayout;
     });
-
     return sorted[0].num;
   }
 
-  // 2. Win Manager is OFF:
-  // "when the button is off the all bet will loss and if a person bet ob all option the lower bet will win"
-
-  // Check if there are outcomes where ALL user bets lose (0 payout)
-  const zeroPayoutCandidates = candidateStats.filter((c) => c.allLost);
-  if (zeroPayoutCandidates.length > 0) {
-    const picked = zeroPayoutCandidates[Math.floor(Math.random() * zeroPayoutCandidates.length)];
-    return picked.num;
-  }
-
-  // If player bet on all options so no 0-payout number exists:
-  // Pick the outcome with the LOWEST winning bet amount (the lower bet wins!)
-  const nonZeroCandidates = [...candidateStats].filter((c) => c.totalPayout > 0);
-  nonZeroCandidates.sort((a, b) => {
-    if (a.totalWinningWager !== b.totalWinningWager) {
-      return a.totalWinningWager - b.totalWinningWager;
-    }
-    return a.totalPayout - b.totalPayout;
-  });
-
-  const minWager = nonZeroCandidates[0].totalWinningWager;
-  const lowestCandidates = nonZeroCandidates.filter((c) => c.totalWinningWager === minWager);
-  const picked = lowestCandidates[Math.floor(Math.random() * lowestCandidates.length)];
-  return picked.num;
+  return typeof defaultNumber === 'number' ? defaultNumber : 5;
 };
 
 // Period prefix helper
@@ -244,18 +272,35 @@ export const getFinalizedRound = (period: string, durationSec: number): Finalize
 };
 
 /**
- * Evaluate bet outcome and return { isWin, payout, netProfit }
+ * Evaluate bet outcome and return { isWin, grossPayout, commission, payout, netProfit }
+ * Applies 2.4% commission deduction on every winning payout ("Hr winn pe 2.4 percent commission katega")
  */
 export const evaluateWinGoBet = (
   target: BetOrderEval['target'],
   amount: number,
   drawnNumber: number
-): { isWin: boolean; payout: number; netProfit: number } => {
-  const payout = calculateBetPayout(target, amount, drawnNumber);
-  const isWin = payout > 0;
+): { isWin: boolean; grossPayout: number; commission: number; payout: number; netProfit: number } => {
+  const grossPayout = calculateBetPayout(target, amount, drawnNumber, false);
+  const isWin = grossPayout > 0;
+  if (!isWin) {
+    return {
+      isWin: false,
+      grossPayout: 0,
+      commission: 0,
+      payout: 0,
+      netProfit: -amount,
+    };
+  }
+
+  const commission = Number((grossPayout * WIN_COMMISSION_RATE).toFixed(2));
+  const payout = Number((grossPayout - commission).toFixed(2));
+  const netProfit = Number((payout - amount).toFixed(2));
+
   return {
-    isWin,
+    isWin: true,
+    grossPayout,
+    commission,
     payout,
-    netProfit: payout - amount,
+    netProfit,
   };
 };

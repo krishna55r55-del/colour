@@ -37,6 +37,8 @@ import {
 import {
   parsePeriodToTimestamp,
   getFinalizedRound,
+  getDeterministicNumberForRound,
+  determineWinGoOutcome,
   evaluateWinGoBet,
 } from '../utils/winLogic';
 
@@ -286,15 +288,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [activeView, setActiveView] = useState<ViewType>('home');
   const [selectedGameId, setSelectedGameId] = useState<GameId | null>(null);
 
-  // Win Manager state: ON = all bets win, OFF = all bets lose (or lowest bet wins if all options bet)
-  const [winManagerEnabled, setWinManagerEnabled] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_WIN_MANAGER);
-      return saved !== null ? saved === 'true' : false;
-    } catch {
-      return false;
-    }
-  });
+  // Win Manager state: strictly defaults to OFF (false) as requested ("Winning button default off Rahe")
+  const [winManagerEnabled, setWinManagerEnabled] = useState<boolean>(false);
 
   useEffect(() => {
     try {
@@ -860,9 +855,26 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return item;
         }
 
-        // Finalize round deterministically
-        const finalized = getFinalizedRound(item.period, dur);
-        const drawnNum = finalized.number;
+        // Look up all pending bets for this exact period and duration
+        const periodBets = pendingBets.filter(
+          (p) => p.period === item.period && (p.duration || 30) === dur
+        );
+        const { roundIdx } = parsePeriodToTimestamp(item.period, dur);
+        const defaultNum = getDeterministicNumberForRound(roundIdx, dur);
+        const drawnNum = periodBets.length > 0
+          ? determineWinGoOutcome(
+              periodBets.map((b) => ({ target: b.target as any, amount: b.betAmount })),
+              winManagerEnabled,
+              defaultNum
+            )
+          : defaultNum;
+
+        const bigSmall: 'Big' | 'Small' = drawnNum >= 5 ? 'Big' : 'Small';
+        let color: 'green' | 'red' | 'purple_red' | 'purple_green';
+        if (drawnNum === 0) color = 'purple_red';
+        else if (drawnNum === 5) color = 'purple_green';
+        else if ([1, 3, 7, 9].includes(drawnNum)) color = 'green';
+        else color = 'red';
 
         let targetVal: any = item.target;
         if (targetVal !== undefined && !isNaN(Number(targetVal))) {
@@ -877,17 +889,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           balanceIncrement += evalRes.payout;
         }
 
-        const outcomeText = `Number ${drawnNum} (${finalized.bigSmall})`;
+        const outcomeText = `Number ${drawnNum} (${bigSmall})`;
 
         // Persist finalized game round to Supabase
         recordGameRoundInSupabase({
           id: `${dur}_${item.period}`,
           duration: dur,
           period: item.period,
-          roundIndex: finalized.roundIndex,
+          roundIndex: roundIdx,
           number: drawnNum,
-          color: finalized.color,
-          bigSmall: finalized.bigSmall,
+          color: color,
+          bigSmall: bigSmall,
           finalizedAt: roundEndTime,
         });
 
@@ -906,6 +918,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           status: 'Completed' as const,
           outcome: outcomeText,
           payout: evalRes.payout,
+          commission: evalRes.commission,
           netProfit: evalRes.netProfit,
           isWin: evalRes.isWin,
           settledAt: roundEndTime,
@@ -982,6 +995,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   status: 'Completed' as const,
                   outcome: match.outcome,
                   payout: match.payout,
+                  commission: match.commission,
                   netProfit: match.netProfit,
                   isWin: match.isWin,
                   settledAt: match.settledAt,
@@ -1025,8 +1039,22 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const recordGameResult = (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => {
+    let finalPayout = item.payout;
+    let finalCommission = item.commission || 0;
+    let finalNetProfit = item.netProfit;
+
+    // Deduct 2.4% commission on winning payouts
+    if (item.isWin && finalPayout > 0 && finalCommission === 0) {
+      finalCommission = Number((finalPayout * 0.024).toFixed(2));
+      finalPayout = Number((finalPayout - finalCommission).toFixed(2));
+      finalNetProfit = Number((finalPayout - item.betAmount).toFixed(2));
+    }
+
     const fullItem: GameHistoryItem = {
       ...item,
+      payout: finalPayout,
+      commission: finalCommission,
+      netProfit: finalNetProfit,
       id: 'round_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
       timestamp: Date.now(),
     };
