@@ -12,7 +12,7 @@
  */
 
 export interface BetOrderEval {
-  target: 'green' | 'red' | 'purple' | 'big' | 'small' | number;
+  target: 'green' | 'red' | 'purple' | 'violet' | 'big' | 'small' | number;
   amount: number;
   label?: string;
 }
@@ -21,9 +21,48 @@ export const WIN_COMMISSION_PERCENT = 2.4; // 2.4% commission on every win
 export const WIN_COMMISSION_RATE = 0.024;
 
 /**
- * Designated Winning Payout Pool:
+ * Designated Multipliers as explicitly defined:
+ * - BIG = 2x
+ * - SMALL = 2x
+ * - RED = 2x
+ * - GREEN = 2x
+ * - VIOLET = 3.5x
+ */
+export const getTargetMultiplier = (target: BetOrderEval['target'] | string): number => {
+  const t = String(target).toLowerCase();
+  if (t === 'violet' || t === 'purple') return 3.5;
+  if (t === 'big' || t === 'small' || t === 'green' || t === 'red') return 2.0;
+  if (!isNaN(Number(target))) return 9.0;
+  return 2.0;
+};
+
+/**
+ * Evaluates whether a given betting target wins against the drawn number (0-9)
+ */
+export const isTargetWinning = (target: BetOrderEval['target'] | string, outcomeNumber: number): boolean => {
+  const t = String(target).toLowerCase();
+  if (t === 'big') return outcomeNumber >= 5;
+  if (t === 'small') return outcomeNumber <= 4;
+  if (t === 'green') return [1, 3, 5, 7, 9].includes(outcomeNumber);
+  if (t === 'red') return [0, 2, 4, 6, 8].includes(outcomeNumber);
+  if (t === 'violet' || t === 'purple') return outcomeNumber === 0 || outcomeNumber === 5;
+  if (typeof target === 'number' || !isNaN(Number(target))) return Number(target) === outcomeNumber;
+  return false;
+};
+
+/**
+ * Descriptive color label for the drawn outcome number
+ */
+export const getOutcomeColorName = (outcomeNumber: number): string => {
+  if (outcomeNumber === 0) return 'Red + Violet';
+  if (outcomeNumber === 5) return 'Green + Violet';
+  if ([1, 3, 7, 9].includes(outcomeNumber)) return 'Green';
+  return 'Red';
+};
+
+/**
+ * Designated Winning Payout Pool for targeted testing:
  * [120, 230, 340, 450, 560, 670, 780, 890, 1020]
- * As requested: "Winning button default off Rahe and kuch amount win ho always 120 230 340 450 560 670 780 890 1020"
  */
 export const TARGET_WIN_AMOUNTS = [120, 230, 340, 450, 560, 670, 780, 890, 1020] as const;
 export const ALWAYS_WIN_AMOUNTS = [120, 230, 340, 450, 560, 670, 780, 890, 1020] as const;
@@ -38,73 +77,20 @@ export const isBetAlwaysWin = (amount: number, winManagerEnabled: boolean = fals
   return ALWAYS_WIN_AMOUNTS.includes(amount as any);
 };
 
-/**
- * Pick winning amount from the designated pool [120, 230, 340, 450, 560, 670, 780, 890, 1020]
- */
-export const pickTargetWinAmount = (betAmount: number, seed?: number): number => {
-  const eligible = TARGET_WIN_AMOUNTS.filter((amt) => amt > betAmount);
-  const pool = eligible.length > 0 ? eligible : TARGET_WIN_AMOUNTS;
-
-  if (typeof seed === 'number' && !isNaN(seed)) {
-    const idx = Math.abs(Math.floor(seed)) % pool.length;
-    return pool[idx];
-  }
-
-  if (betAmount <= 10) {
-    const lowPool = pool.filter((a) => a <= 340);
-    const pickFrom = lowPool.length > 0 ? lowPool : pool;
-    return pickFrom[Math.floor(Math.random() * pickFrom.length)];
-  } else if (betAmount <= 50) {
-    const midPool = pool.filter((a) => a >= 230 && a <= 560);
-    const pickFrom = midPool.length > 0 ? midPool : pool;
-    return pickFrom[Math.floor(Math.random() * pickFrom.length)];
-  } else if (betAmount <= 100) {
-    const midHighPool = pool.filter((a) => a >= 340 && a <= 780);
-    const pickFrom = midHighPool.length > 0 ? midHighPool : pool;
-    return pickFrom[Math.floor(Math.random() * pickFrom.length)];
-  } else if (betAmount <= 300) {
-    const highPool = pool.filter((a) => a >= 560 && a <= 890);
-    const pickFrom = highPool.length > 0 ? highPool : pool;
-    return pickFrom[Math.floor(Math.random() * pickFrom.length)];
-  } else if (betAmount <= 500) {
-    const topPool = pool.filter((a) => a >= 780);
-    const pickFrom = topPool.length > 0 ? topPool : pool;
-    return pickFrom[Math.floor(Math.random() * pickFrom.length)];
-  } else {
-    // For very high bets (>= 1000)
-    const multiplier = Math.ceil(betAmount / 500);
-    return 1020 * Math.max(1, multiplier);
-  }
-};
-
 export const calculateBetPayout = (
   target: BetOrderEval['target'],
   amount: number,
   outcomeNumber: number,
   applyCommission: boolean = true
 ): number => {
-  let isHit = false;
-  if (typeof target === 'number') {
-    isHit = target === outcomeNumber;
-  } else if (target === 'green') {
-    isHit = [1, 3, 5, 7, 9].includes(outcomeNumber);
-  } else if (target === 'red') {
-    isHit = [0, 2, 4, 6, 8].includes(outcomeNumber);
-  } else if (target === 'purple') {
-    isHit = outcomeNumber === 0 || outcomeNumber === 5;
-  } else if (target === 'big') {
-    isHit = outcomeNumber >= 5;
-  } else if (target === 'small') {
-    isHit = outcomeNumber <= 4;
-  }
-
+  const isHit = isTargetWinning(target, outcomeNumber);
   if (!isHit) return 0;
 
-  // Selected gross payout from target win pool [120, 230, 340, 450, 560, 670, 780, 890, 1020]
-  const gross = pickTargetWinAmount(amount, outcomeNumber * 13 + amount);
+  const multiplier = getTargetMultiplier(target);
+  const gross = Number((amount * multiplier).toFixed(2));
 
   if (applyCommission) {
-    const commission = gross * WIN_COMMISSION_RATE;
+    const commission = Number((gross * WIN_COMMISSION_RATE).toFixed(2));
     return Number((gross - commission).toFixed(2));
   }
   return gross;
@@ -310,39 +296,52 @@ export const getFinalizedRound = (period: string, durationSec: number): Finalize
 };
 
 /**
- * Evaluate bet outcome and return { isWin, grossPayout, commission, payout, netProfit }
- * Applies 2.4% commission deduction on every winning payout ("Hr winn pe 2.4 percent commission katega")
+ * Evaluate bet outcome and return { isWin, grossPayout, commission, payout, netProfit, resultNumber, resultColor, selectedOption }
+ * Applies 2.4% commission deduction on every winning payout
  */
 export const evaluateWinGoBet = (
-  target: BetOrderEval['target'],
+  target: BetOrderEval['target'] | string,
   amount: number,
   drawnNumber: number,
   forcedGrossPayout?: number,
   winManagerEnabled: boolean = false
-): { isWin: boolean; grossPayout: number; commission: number; payout: number; netProfit: number } => {
-  const willWin = isBetAlwaysWin(amount, winManagerEnabled);
+): {
+  isWin: boolean;
+  grossPayout: number;
+  commission: number;
+  payout: number;
+  netProfit: number;
+  resultNumber: number;
+  resultColor: string;
+  selectedOption: string;
+} => {
+  const isHit = isTargetWinning(target as any, drawnNumber);
+  const colorName = getOutcomeColorName(drawnNumber);
+  const optName = String(target).toUpperCase();
 
-  // When button is OFF and bet amount is NOT one of [120, 230, 340, 450, 560, 670, 780, 890, 1020]:
-  // Strictly always a LOSS!
-  if (!willWin) {
+  if (!isHit) {
     return {
       isWin: false,
       grossPayout: 0,
       commission: 0,
       payout: 0,
       netProfit: -amount,
+      resultNumber: drawnNumber,
+      resultColor: colorName,
+      selectedOption: optName,
     };
   }
 
-  // When willWin is true (either ON for all, or 120/230/... for off on both):
-  // User is guaranteed to win!
-  const grossPayout =
-    forcedGrossPayout && forcedGrossPayout > 0
-      ? forcedGrossPayout
-      : pickTargetWinAmount(amount, drawnNumber * 13 + amount);
+  const multiplier = getTargetMultiplier(target as any);
+  const grossPayout = forcedGrossPayout && forcedGrossPayout > 0
+    ? forcedGrossPayout
+    : Number((amount * multiplier).toFixed(2));
 
+  // Deduct 2.4% commission on gross winning amount
   const commission = Number((grossPayout * WIN_COMMISSION_RATE).toFixed(2));
+  // Net winning amount credited to user wallet
   const payout = Number((grossPayout - commission).toFixed(2));
+  // Final profit or loss
   const netProfit = Number((payout - amount).toFixed(2));
 
   return {
@@ -351,5 +350,8 @@ export const evaluateWinGoBet = (
     commission,
     payout,
     netProfit,
+    resultNumber: drawnNumber,
+    resultColor: colorName,
+    selectedOption: optName,
   };
 };

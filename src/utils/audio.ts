@@ -2,9 +2,19 @@
 class SoundFX {
   private ctx: AudioContext | null = null;
   private enabled: boolean = true;
+  private lastBeepSecond: number | null = null;
 
   constructor() {
     // AudioContext will be initialized on first user gesture
+    if (typeof window !== 'undefined') {
+      const unlockAudio = () => {
+        this.resumeContext();
+        window.removeEventListener('click', unlockAudio);
+        window.removeEventListener('touchstart', unlockAudio);
+      };
+      window.addEventListener('click', unlockAudio, { passive: true });
+      window.addEventListener('touchstart', unlockAudio, { passive: true });
+    }
   }
 
   public setEnabled(enabled: boolean) {
@@ -15,7 +25,17 @@ class SoundFX {
     return this.enabled;
   }
 
-  public play(type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss') {
+  public resumeContext() {
+    this.initContext();
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+  }
+
+  public play(
+    type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss' | 'countdown_beep' | 'round_end',
+    arg?: number
+  ) {
     switch (type) {
       case 'click':
         return this.playClick();
@@ -32,6 +52,10 @@ class SoundFX {
         return this.playJackpot();
       case 'loss':
         return this.playLoss();
+      case 'countdown_beep':
+        return this.playCountdownBeep(arg ?? 1);
+      case 'round_end':
+        return this.playRoundEndSound();
     }
   }
 
@@ -222,6 +246,65 @@ class SoundFX {
 
         osc.start(now + idx * 0.09);
         osc.stop(now + idx * 0.09 + 0.14);
+      });
+    } catch {}
+  }
+
+  // 5 to 1 second countdown beep: Crisp, non-overlapping, synchronized
+  public playCountdownBeep(second: number) {
+    if (!this.enabled) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sine';
+      // Pitch slightly rises as timer gets closer to 1s for urgency: 720Hz -> 880Hz
+      const freq = 720 + (5 - Math.max(1, Math.min(5, second))) * 35;
+      osc.frequency.setValueAtTime(freq, now);
+
+      // Clean short envelope (80ms) to prevent overlapping
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.08);
+    } catch {}
+  }
+
+  // 0 seconds: Distinct final sound signifying round lock & draw
+  public playRoundEndSound() {
+    if (!this.enabled) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+
+      const now = this.ctx.currentTime;
+      // Dual harmonic chime (chord 523Hz + 1046Hz with rich decay)
+      [523.25, 1046.5].forEach((freq, idx) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now);
+
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(idx === 0 ? 0.22 : 0.14, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.45);
       });
     } catch {}
   }

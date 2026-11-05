@@ -15,7 +15,6 @@ export const CONTINUOUS_ROUND_DURATION_SEC = 30; // 30-second continuous round c
 export const GAME_PERIOD_PREFIXES: Record<GameId, string> = {
   'color-prediction': '30',
   'dice-roll': 'DICE',
-  'dragon-tiger': 'DT',
   'lucky-number': 'LNUM',
   'coin-flip': 'COIN',
   'number-prediction': 'NUMP',
@@ -157,31 +156,6 @@ export const calculateDeterministicGameOutcome = (gameId: GameId, roundIndex: nu
         summary: `Dice ${die1} + ${die2} = ${sum}`,
         badge: label,
         data: { die1, die2, sum, category, isDoubles },
-      };
-    }
-
-    case 'dragon-tiger': {
-      const hD = deterministicHash(roundIndex, 301);
-      const hT = deterministicHash(roundIndex, 302);
-      const dRank = (hD % 13) + 1;
-      const tRank = (hT % 13) + 1;
-      const dSuit = SUITS[hD % 4];
-      const tSuit = SUITS[hT % 4];
-      const winner = dRank > tRank ? 'dragon' : tRank > dRank ? 'tiger' : 'tie';
-      const winnerLabel = winner === 'dragon' ? 'Dragon Wins' : winner === 'tiger' ? 'Tiger Wins' : 'Tie';
-
-      return {
-        gameId,
-        period,
-        roundIndex,
-        timestamp,
-        summary: `Dragon ${RANK_LABELS[dRank]}${dSuit} vs Tiger ${RANK_LABELS[tRank]}${tSuit}`,
-        badge: winnerLabel,
-        data: {
-          dragon: { rank: dRank, rankLabel: RANK_LABELS[dRank], suit: dSuit },
-          tiger: { rank: tRank, rankLabel: RANK_LABELS[tRank], suit: tSuit },
-          winner,
-        },
       };
     }
 

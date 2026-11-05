@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
 import {
-  ArrowLeft,
   Wallet,
   Zap,
   CheckCircle,
@@ -30,7 +29,6 @@ export const DepositView: React.FC = () => {
     submitDepositRequest,
     playSound,
     setActiveView,
-    hasCompletedFirstDeposit,
   } = useGame();
 
   // Recharge Form State
@@ -120,39 +118,6 @@ export const DepositView: React.FC = () => {
     playSound('click');
   };
 
-  // Helper to generate a demo sample screenshot receipt for quick testing
-  const handleUseDemoScreenshot = () => {
-    playSound('click');
-    const svgReceipt = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
-      <defs>
-        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#0f172a" />
-          <stop offset="100%" stop-color="#1e293b" />
-        </linearGradient>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#bg)" rx="24"/>
-      <circle cx="200" cy="80" r="36" fill="#10b981" />
-      <path d="M185 80 L195 90 L215 70" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-      <text x="200" y="145" font-family="sans-serif" font-size="20" font-weight="bold" fill="#ffffff" text-anchor="middle">UPI Transfer Successful</text>
-      <text x="200" y="185" font-family="monospace" font-size="34" font-weight="900" fill="#10b981" text-anchor="middle">₹${totalCredited.toLocaleString()}</text>
-      <line x1="40" y1="215" x2="360" y2="215" stroke="#334155" stroke-width="1.5" stroke-dasharray="4"/>
-      <text x="50" y="245" font-family="sans-serif" font-size="13" fill="#94a3b8">Paid To:</text>
-      <text x="350" y="245" font-family="sans-serif" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="end">cobclub.pay@upi</text>
-      <text x="50" y="280" font-family="sans-serif" font-size="13" fill="#94a3b8">UTR Ref No:</text>
-      <text x="350" y="280" font-family="monospace" font-size="14" font-weight="bold" fill="#38bdf8" text-anchor="end">${utrInput || '423891029384'}</text>
-      <text x="50" y="315" font-family="sans-serif" font-size="13" fill="#94a3b8">Date &amp; Time:</text>
-      <text x="350" y="315" font-family="sans-serif" font-size="12" fill="#cbd5e1" text-anchor="end">${new Date().toLocaleString()}</text>
-      <rect x="40" y="340" width="320" height="34" rx="10" fill="#1e293b" stroke="#334155"/>
-      <text x="200" y="362" font-family="sans-serif" font-size="11" font-weight="bold" fill="#10b981" text-anchor="middle">Official Verified Payment Proof</text>
-    </svg>`;
-    const dataUri = `data:image/svg+xml;utf8,${encodeURIComponent(svgReceipt)}`;
-    setScreenshotData(dataUri);
-    setScreenshotFileName(`Payment_Receipt_₹${totalCredited}.svg`);
-    if (!utrInput.trim()) {
-      setUtrInput(String(Math.floor(400000000000 + Math.random() * 599999999999)));
-    }
-  };
-
   // Submit deposit request for Admin Approval
   const handleSubmitDepositWithProof = () => {
     setFormError('');
@@ -200,55 +165,6 @@ export const DepositView: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 pb-24 space-y-6 animate-in fade-in duration-200">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => {
-              playSound('click');
-              setActiveView('home');
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors border border-slate-200 cursor-pointer"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 text-rose-600" />
-            <span>Back</span>
-          </button>
-
-          <div>
-            <h1 className="text-base sm:text-lg font-black font-display text-slate-900 tracking-wide flex items-center gap-2">
-              <span>Recharge &amp; Deposit Points</span>
-            </h1>
-            <p className="text-[11px] text-slate-500">
-              Submit UTR &amp; payment screenshot. Balance points are added once approved by administrator.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="px-3 py-1.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1.5">
-            <Wallet className="w-3.5 h-3.5" />
-            <span>Balance: ₹{balance.toLocaleString()}</span>
-          </div>
-        </div>
-      </div>
-
-      {!hasCompletedFirstDeposit && (
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-600 to-red-600 text-white shadow-md border border-amber-300/40 flex items-center gap-3.5 animate-in fade-in duration-200">
-          <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center shrink-0 border border-white/30 text-amber-200">
-            <Sparkles className="w-5 h-5 animate-pulse" />
-          </div>
-          <div className="text-xs">
-            <div className="font-black text-amber-300 uppercase tracking-wide">
-              Deposit 1 time to play with bonus money
-            </div>
-            <div className="text-white/90 text-[11px] mt-0.5">
-              Your registered balance has ₹98 bonus ready. Complete your 1st deposit to unlock instant betting on all 10 games!
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="space-y-6">
           {/* Wallet Balance Hero Card */}
           <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-[#e52e2e] via-[#f53b3b] to-[#ff5252] text-white shadow-lg relative overflow-hidden">
@@ -449,39 +365,12 @@ export const DepositView: React.FC = () => {
           {/* STEP 3: SUBMIT UTR & SUBMIT SS (SCREENSHOT) OPTION       */}
           {/* ======================================================== */}
           <div className="bg-white p-5 rounded-3xl border-2 border-rose-300 shadow-md space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <span className="text-[10px] font-black uppercase text-rose-600 tracking-wider">
-                  Verification &amp; Proof Submission
-                </span>
-                <h3 className="text-base font-black text-slate-900 mt-0.5">
-                  Step 3: Submit UTR &amp; Payment Screenshot (SS)
-                </h3>
-              </div>
-              <span className="text-[11px] font-black bg-rose-100 text-rose-700 px-2.5 py-1 rounded-full border border-rose-200">
-                Required for Point Credit
-              </span>
-            </div>
-
             {/* UTR Input */}
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-rose-600" />
-                  12-Digit UTR / Transaction Reference Number
-                </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const sample = String(Math.floor(400000000000 + Math.random() * 599999999999));
-                    setUtrInput(sample);
-                    playSound('click');
-                  }}
-                  className="text-[10px] font-bold text-rose-600 hover:text-rose-700 underline cursor-pointer"
-                >
-                  Generate Sample UTR
-                </button>
-              </div>
+              <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-1.5 mb-1.5">
+                <FileText className="w-3.5 h-3.5 text-rose-600" />
+                12-Digit UTR / Transaction Reference Number
+              </label>
 
               <div className="relative">
                 <input
@@ -495,26 +384,14 @@ export const DepositView: React.FC = () => {
                   className="w-full px-4 py-3 rounded-2xl border border-slate-300 bg-slate-50 text-slate-900 font-mono text-sm font-bold placeholder:text-slate-400 placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-rose-500 focus:bg-white transition-all uppercase"
                 />
               </div>
-              <span className="text-[11px] text-slate-400 mt-1 block">
-                Found on your payment app receipt under &quot;UTR&quot;, &quot;UPI Ref No.&quot;, or &quot;Bank Ref ID&quot;.
-              </span>
             </div>
 
             {/* Submit SS (Screenshot) Option */}
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-                  <ImageIcon className="w-3.5 h-3.5 text-rose-600" />
-                  Submit Screenshot (SS Proof)
-                </label>
-                <button
-                  type="button"
-                  onClick={handleUseDemoScreenshot}
-                  className="text-[10px] font-bold text-amber-600 hover:text-amber-700 underline cursor-pointer"
-                >
-                  Use Demo Payment Receipt SS
-                </button>
-              </div>
+              <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-1.5 mb-1.5">
+                <ImageIcon className="w-3.5 h-3.5 text-rose-600" />
+                Submit Screenshot (SS Proof)
+              </label>
 
               {/* Hidden file input */}
               <input
@@ -587,9 +464,6 @@ export const DepositView: React.FC = () => {
                   <div className="text-xs font-bold text-slate-800">
                     Click to Upload Payment Screenshot (SS)
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Supports JPG, PNG, WEBP receipts from GPay, PhonePe, Paytm, or Bank App.
-                  </p>
                 </div>
               )}
             </div>
@@ -601,17 +475,6 @@ export const DepositView: React.FC = () => {
                 <span>{formError}</span>
               </div>
             )}
-
-            {/* Verification Rule Notice */}
-            <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-1">
-              <div className="font-extrabold flex items-center gap-1.5 text-amber-900">
-                <ShieldCheck className="w-4 h-4 text-amber-600" />
-                <span>Deposit Policy: Only persona who deposit money get balance added</span>
-              </div>
-              <p className="text-[11px] text-amber-800">
-                Balance points are credited to your login account <strong>only when the administrator approves your deposit</strong> after verifying your submitted UTR &amp; Screenshot.
-              </p>
-            </div>
 
             {/* Submit Action Button */}
             <button

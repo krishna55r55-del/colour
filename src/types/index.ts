@@ -1,7 +1,6 @@
 export type GameId =
   | 'color-prediction'
   | 'dice-roll'
-  | 'dragon-tiger'
   | 'lucky-number'
   | 'coin-flip'
   | 'number-prediction'
@@ -43,8 +42,12 @@ export interface GameHistoryItem {
   target?: string;
   multiplier?: number;
   duration?: number;
+  grossPayout?: number;
   commission?: number;
   settledAt?: number;
+  resultNumber?: number;
+  resultColor?: string;
+  selectedOption?: string;
 }
 
 export interface PredictionRoundRecord {
@@ -61,10 +64,11 @@ export interface PredictionRoundRecord {
 export interface WinGoBetOrderInput {
   period: string;
   duration: number; // 30, 60, 180, 300
-  target: 'green' | 'purple' | 'red' | 'big' | 'small' | number;
+  target: 'green' | 'purple' | 'violet' | 'red' | 'big' | 'small' | number;
   label: string;
   multiplier: number;
   amount: number;
+  selectedOption?: string;
 }
 
 export interface UserStats {

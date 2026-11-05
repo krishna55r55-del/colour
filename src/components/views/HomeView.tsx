@@ -12,7 +12,6 @@ import {
   Shield,
   Palette,
   Layers,
-  Crown,
   Zap,
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
@@ -49,14 +48,6 @@ export const HomeView: React.FC = () => {
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 p-0.5 shadow-lg shadow-cyan-600/30">
             <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center">
               <Dices className="w-6 h-6 text-cyan-400" />
-            </div>
-          </div>
-        );
-      case 'dragon-tiger':
-        return (
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 via-orange-600 to-red-600 p-0.5 shadow-lg shadow-amber-600/30">
-            <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center">
-              <Crown className="w-6 h-6 text-amber-400" />
             </div>
           </div>
         );
@@ -156,7 +147,7 @@ export const HomeView: React.FC = () => {
             </h1>
 
             <p className="text-xs sm:text-sm text-white/90 max-w-lg mx-auto leading-relaxed font-medium">
-              Fair & Transparent Online Prediction Gaming. Enjoy 10 exciting games including Win Go, Dice Roll, Dragon Tiger, and more with instant results!
+              Fair & Transparent Online Prediction Gaming. Enjoy 9 exciting games including Win Go, Dice Roll, Lucky Number, and more with instant results!
             </p>
 
             <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
@@ -174,7 +165,7 @@ export const HomeView: React.FC = () => {
                 onClick={handleExploreClick}
                 className="px-6 py-3 rounded-full bg-white/20 hover:bg-white/30 text-white font-bold text-xs uppercase tracking-wider transition-all border border-white/30 cursor-pointer"
               >
-                All 10 Games
+                All 9 Games
               </button>
             </div>
           </div>
@@ -344,7 +335,7 @@ export const HomeView: React.FC = () => {
         </section>
       )}
 
-      {/* All 10 Games Responsive Grid */}
+      {/* All 9 Games Responsive Grid */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 mb-6">
           <div>
@@ -352,7 +343,7 @@ export const HomeView: React.FC = () => {
               Complete Arena
             </div>
             <h2 className="text-2xl sm:text-3xl font-black font-display text-slate-900">
-              All 10 Interactive Games
+              All 9 Interactive Games
             </h2>
           </div>
           <span className="text-xs text-slate-500">

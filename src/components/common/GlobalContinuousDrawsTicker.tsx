@@ -24,7 +24,7 @@ export const GlobalContinuousDrawsTicker: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Compute live current outcomes for all 10 games
+  // Compute live current outcomes for all 9 games
   const currentRoundIndex = Math.floor(Date.now() / (CONTINUOUS_ROUND_DURATION_SEC * 1000));
   const previousRoundIndex = currentRoundIndex - 1;
 
@@ -40,7 +40,7 @@ export const GlobalContinuousDrawsTicker: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">
-                  24/7 Live Continuous Rounds (All 10 Games)
+                  24/7 Live Continuous Rounds (All 9 Games)
                 </h3>
                 <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase tracking-wider">
                   Live Sync
@@ -63,7 +63,7 @@ export const GlobalContinuousDrawsTicker: React.FC = () => {
           </div>
         </div>
 
-        {/* 10 Games Real-Time Continuous Rounds Grid */}
+        {/* 9 Games Real-Time Continuous Rounds Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
           {ALL_GAMES.map((game) => {
             const lastOutcome = calculateDeterministicGameOutcome(game.id, previousRoundIndex);

@@ -18,9 +18,14 @@ import {
   Award,
   Trophy,
   Frown,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
-import { WinModal } from '../common/WinModal';
+import { WinPosterModal, WinPosterData } from '../common/WinPosterModal';
+import { LossPosterModal, LossPosterData } from '../common/LossPosterModal';
+import { BetPlacedToast } from '../common/BetPlacedToast';
+import { BetDetailModal } from '../common/BetDetailModal';
 import {
   determineWinGoOutcome,
   getDeterministicNumberForRound,
@@ -33,7 +38,7 @@ import {
 import { GameHistoryItem } from '../../types';
 
 type WinGoDuration = 30 | 60 | 180 | 300;
-type BetTargetType = 'green' | 'purple' | 'red' | 'big' | 'small' | number;
+type BetTargetType = 'green' | 'purple' | 'violet' | 'red' | 'big' | 'small';
 
 interface BetOrder {
   id: string;
@@ -97,6 +102,8 @@ export const ColorPredictionGame: React.FC = () => {
     submitWinGoBet,
     pendingWinGoBets,
     settleWinGoBets,
+    soundEnabled,
+    toggleSound,
   } = useGame();
 
   const [betOutcomeFilter, setBetOutcomeFilter] = useState<'all' | 'pending' | 'wins' | 'losses'>('all');
@@ -104,6 +111,28 @@ export const ColorPredictionGame: React.FC = () => {
 
   const winManagerEnabledRef = useRef(winManagerEnabled);
   winManagerEnabledRef.current = winManagerEnabled;
+
+  // Sound synchronization ref to guarantee exactly one sound per second in final 5 seconds
+  const lastSoundSecRef = useRef<number | null>(null);
+
+  // New Win & Loss Posters and Bet Placed Toast states
+  const [showBetPlacedToast, setShowBetPlacedToast] = useState(false);
+  const [winPosterData, setWinPosterData] = useState<WinPosterData>({
+    isOpen: false,
+    selectedOption: '',
+    resultNumber: 0,
+    betAmount: 0,
+    grossWinningAmount: 0,
+    commissionDeducted: 0,
+    finalCreditedAmount: 0,
+  });
+  const [lossPosterData, setLossPosterData] = useState<LossPosterData>({
+    isOpen: false,
+    selectedOption: '',
+    resultNumber: 0,
+    lostBetAmount: 0,
+  });
+  const [selectedBetForDetail, setSelectedBetForDetail] = useState<GameHistoryItem | null>(null);
 
   // Mode selection: 30s, 1Min, 3Min, 5Min
   const [selectedDuration, setSelectedDuration] = useState<WinGoDuration>(30);
@@ -279,10 +308,14 @@ export const ColorPredictionGame: React.FC = () => {
     // Trigger instant settlement of pending bets
     settleWinGoBets();
 
-    // Check if user placed bets on this period to show Win/Loss modal if currently viewing this duration
+    // Check if user placed bets on this period to show Win/Loss poster if currently viewing this duration
     if (betsInThisPeriod.length > 0 && selectedDurationRef.current === dur) {
       let totalBet = 0;
-      let totalPayout = 0;
+      let totalGrossPayout = 0;
+      let totalCommission = 0;
+      let totalFinalCredited = 0;
+      const winningOptions: string[] = [];
+      const losingOptions: string[] = [];
 
       betsInThisPeriod.forEach((b) => {
         totalBet += b.betAmount;
@@ -292,19 +325,48 @@ export const ColorPredictionGame: React.FC = () => {
         }
         const evalRes = evaluateWinGoBet(targetVal, b.betAmount, drawnNumber, undefined, winManagerEnabledRef.current);
         if (evalRes.isWin) {
-          totalPayout += evalRes.payout;
+          totalGrossPayout += evalRes.grossPayout;
+          totalCommission += evalRes.commission;
+          totalFinalCredited += evalRes.payout;
+          winningOptions.push(evalRes.selectedOption);
+        } else {
+          losingOptions.push(evalRes.selectedOption);
         }
       });
 
-      const hasWin = totalPayout > 0;
-      setWinModalState({
-        isOpen: true,
-        isWin: hasWin,
-        payout: totalPayout,
-        multiplier: totalBet > 0 ? Number((totalPayout / totalBet).toFixed(2)) : 0,
-        message: `Win Go ${dur >= 60 ? `${dur / 60}Min` : `${dur}s`} #${periodToResolve.slice(-6)} resolved to Number ${drawnNumber} (${bigSmall})!`,
-        betAmount: totalBet,
-      });
+      const colorLabel =
+        colorType === 'purple_red'
+          ? 'Red + Violet'
+          : colorType === 'purple_green'
+          ? 'Green + Violet'
+          : colorType === 'green'
+          ? 'Green'
+          : 'Red';
+
+      if (totalFinalCredited > 0) {
+        setWinPosterData({
+          isOpen: true,
+          selectedOption: winningOptions.join(', ') || 'WIN',
+          resultNumber: drawnNumber,
+          resultColor: colorLabel,
+          betAmount: totalBet,
+          grossWinningAmount: totalGrossPayout,
+          commissionDeducted: totalCommission,
+          finalCreditedAmount: totalFinalCredited,
+          period: periodToResolve,
+        });
+        playSound('win');
+      } else {
+        setLossPosterData({
+          isOpen: true,
+          selectedOption: losingOptions.join(', ') || 'BET',
+          resultNumber: drawnNumber,
+          resultColor: colorLabel,
+          lostBetAmount: totalBet,
+          period: periodToResolve,
+        });
+        playSound('loss');
+      }
     }
 
     // Advance period for this specific section
@@ -338,10 +400,24 @@ export const ColorPredictionGame: React.FC = () => {
       const activeDur = selectedDurationRef.current;
       const secInCycle = Math.floor((now / 1000) % activeDur);
       const remaining = activeDur - secInCycle;
-      setTimeLeft(remaining === 0 ? activeDur : remaining);
+      const currentSec = remaining === 0 ? activeDur : remaining;
+      setTimeLeft(currentSec);
 
-      if (remaining <= 5 && remaining > 0) {
-        playSound('tick');
+      // Requirement 8: Sound effects during final five seconds:
+      // 5s, 4s, 3s, 2s, 1s: Beep
+      // 0s: Different final sound
+      if (currentSec <= 5 && currentSec >= 1) {
+        if (lastSoundSecRef.current !== currentSec) {
+          lastSoundSecRef.current = currentSec;
+          playSound('countdown_beep', currentSec);
+        }
+      } else if (currentSec === activeDur || currentSec === 0) {
+        if (lastSoundSecRef.current !== 0) {
+          lastSoundSecRef.current = 0;
+          playSound('round_end');
+        }
+      } else {
+        lastSoundSecRef.current = null;
       }
     };
 
@@ -393,39 +469,33 @@ export const ColorPredictionGame: React.FC = () => {
   };
 
 
-  // Open Bet Drawer
+  // Open Bet Drawer for one of the 5 options: BIG, SMALL, GREEN, VIOLET, RED
   const openBetDrawer = (target: BetTargetType) => {
     if (timeLeft <= 5) return; // Betting closed in last 5 seconds
 
     playSound('click');
     let label = '';
-    let payoutLabel = '2.0X Payout';
+    let payoutLabel = '2.0X Multiplier';
     let themeColor: 'green' | 'purple' | 'red' | 'yellow' | 'blue' = 'green';
 
-    if (typeof target === 'number') {
-      label = `Number ${target}`;
-      payoutLabel = '9.0X Multiplier';
-      if (target === 0 || target === 5) themeColor = 'purple';
-      else if ([1, 3, 7, 9].includes(target)) themeColor = 'green';
-      else themeColor = 'red';
-    } else if (target === 'green') {
-      label = 'Contract: Green';
-      payoutLabel = '2.0X (1.5X on #5)';
+    if (target === 'green') {
+      label = 'GREEN';
+      payoutLabel = '2.0X Multiplier';
       themeColor = 'green';
-    } else if (target === 'purple') {
-      label = 'Contract: Violet';
-      payoutLabel = '4.5X Multiplier';
+    } else if (target === 'purple' || target === 'violet') {
+      label = 'VIOLET';
+      payoutLabel = '3.5X Multiplier';
       themeColor = 'purple';
     } else if (target === 'red') {
-      label = 'Contract: Red';
-      payoutLabel = '2.0X (1.5X on #0)';
+      label = 'RED';
+      payoutLabel = '2.0X Multiplier';
       themeColor = 'red';
     } else if (target === 'big') {
-      label = 'Contract: Big (5–9)';
+      label = 'BIG';
       payoutLabel = '2.0X Multiplier';
       themeColor = 'yellow';
     } else if (target === 'small') {
-      label = 'Contract: Small (0–4)';
+      label = 'SMALL';
       payoutLabel = '2.0X Multiplier';
       themeColor = 'blue';
     }
@@ -442,13 +512,6 @@ export const ColorPredictionGame: React.FC = () => {
     });
   };
 
-  // Random Bet handler
-  const handleRandomBet = () => {
-    const options: BetTargetType[] = ['green', 'purple', 'red', 'big', 'small', 0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-    const picked = options[Math.floor(Math.random() * options.length)];
-    openBetDrawer(picked);
-  };
-
   // Confirm bet in modal: permanently saved to GameContext & Supabase
   const handleConfirmBet = () => {
     if (!betModal.target) return;
@@ -462,9 +525,11 @@ export const ColorPredictionGame: React.FC = () => {
       return;
     }
 
+    // Set exact multipliers: BIG = 2x, SMALL = 2x, RED = 2x, GREEN = 2x, VIOLET = 3.5x
     let mult = 2.0;
-    if (typeof betModal.target === 'number') mult = 9.0;
-    else if (betModal.target === 'purple') mult = 4.5;
+    if (betModal.target === 'purple' || betModal.target === 'violet') {
+      mult = 3.5;
+    }
 
     const res = submitWinGoBet({
       period: currentPeriod,
@@ -473,10 +538,13 @@ export const ColorPredictionGame: React.FC = () => {
       label: betModal.label,
       multiplier: mult,
       amount: totalWager,
+      selectedOption: betModal.label,
     });
 
     if (res.success) {
       setBetModal((prev) => ({ ...prev, isOpen: false }));
+      // Trigger green BET PLACED SUCCESSFULLY notification
+      setShowBetPlacedToast(true);
     } else if (res.error) {
       alert(res.error);
     }
@@ -555,17 +623,39 @@ export const ColorPredictionGame: React.FC = () => {
           </span>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            playSound('click');
-            setShowHowToPlay(true);
-          }}
-          className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors border border-slate-200"
-          title="Market Rules & Multipliers"
-        >
-          <HelpCircle className="w-4 h-4 text-rose-500" />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Sound ON/OFF Toggle */}
+          <button
+            type="button"
+            onClick={toggleSound}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-bold transition-all border cursor-pointer ${
+              soundEnabled
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100 shadow-2xs'
+                : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+            }`}
+            title={soundEnabled ? 'Sound is ON - Click to Mute' : 'Sound is OFF - Click to Unmute'}
+            aria-label="Toggle Sound Effects"
+          >
+            {soundEnabled ? (
+              <Volume2 className="w-3.5 h-3.5 text-emerald-600" />
+            ) : (
+              <VolumeX className="w-3.5 h-3.5 text-slate-400" />
+            )}
+            <span className="text-[11px] font-extrabold">{soundEnabled ? 'SOUND ON' : 'SOUND OFF'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              playSound('click');
+              setShowHowToPlay(true);
+            }}
+            className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors border border-slate-200 cursor-pointer"
+            title="Market Rules & Multipliers"
+          >
+            <HelpCircle className="w-4 h-4 text-rose-500" />
+          </button>
+        </div>
       </div>
 
       {/* 1. Wallet Balance Card (Red Gradient like screenshot WhatsApp Image 2026-10-10 at 10.35.38 AM (1).jpeg) */}
@@ -818,124 +908,85 @@ export const ColorPredictionGame: React.FC = () => {
           </div>
         )}
 
-        {/* Colors Row */}
-        <div className="grid grid-cols-3 gap-2.5">
-          <button
-            type="button"
-            disabled={timeLeft <= 5}
-            onClick={() => openBetDrawer('green')}
-            className="py-3 px-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-sm tracking-wide shadow-lg shadow-emerald-600/30 active:scale-98 transition-all disabled:opacity-40 flex flex-col items-center justify-center"
-          >
-            <span>Green</span>
-            <span className="text-[10px] font-semibold opacity-90">2.0X</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={timeLeft <= 5}
-            onClick={() => openBetDrawer('purple')}
-            className="py-3 px-2 rounded-xl bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:from-purple-500 hover:to-fuchsia-500 text-white font-black text-sm tracking-wide shadow-lg shadow-purple-600/30 active:scale-98 transition-all disabled:opacity-40 flex flex-col items-center justify-center"
-          >
-            <span>Violet</span>
-            <span className="text-[10px] font-semibold opacity-90">4.5X</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={timeLeft <= 5}
-            onClick={() => openBetDrawer('red')}
-            className="py-3 px-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 text-white font-black text-sm tracking-wide shadow-lg shadow-rose-600/30 active:scale-98 transition-all disabled:opacity-40 flex flex-col items-center justify-center"
-          >
-            <span>Red</span>
-            <span className="text-[10px] font-semibold opacity-90">2.0X</span>
-          </button>
-        </div>
-
-        {/* 5. Number Balls (0–9) (Crisp light container with sleek border) */}
-        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 shadow-inner">
-          <div className="grid grid-cols-5 gap-2 justify-items-center">
-            {[0, 1, 2, 3, 4].map((num) => (
-              <button
-                key={num}
-                type="button"
-                disabled={timeLeft <= 5}
-                onClick={() => openBetDrawer(num)}
-                className="cursor-pointer transition-transform hover:scale-105 active:scale-95 disabled:opacity-40 relative group"
-                title={`Predict Number ${num} (9.0X Multiplier)`}
-              >
-                {renderBall(num, 'md')}
-              </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-5 gap-2 justify-items-center">
-            {[5, 6, 7, 8, 9].map((num) => (
-              <button
-                key={num}
-                type="button"
-                disabled={timeLeft <= 5}
-                onClick={() => openBetDrawer(num)}
-                className="cursor-pointer transition-transform hover:scale-105 active:scale-95 disabled:opacity-40 relative group"
-                title={`Predict Number ${num} (9.0X Multiplier)`}
-              >
-                {renderBall(num, 'md')}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 6. Random Quick Selection & Multipliers Bar (Responsive Grid) */}
-        <div className="grid grid-cols-6 gap-1 sm:gap-1.5 w-full">
-          <button
-            type="button"
-            disabled={timeLeft <= 5}
-            onClick={handleRandomBet}
-            className="py-2 px-1 sm:px-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-rose-600 font-black text-[11px] sm:text-xs border border-rose-200 transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-1 cursor-pointer"
-          >
-            <Sparkles className="w-3 h-3 text-rose-500 shrink-0 hidden xs:inline" />
-            <span>Rand</span>
-          </button>
-
-          {[1, 5, 10, 20, 50].map((mult) => (
+        {/* Five Betting Options: GREEN (2x), VIOLET (3.5x), RED (2x), BIG (2x), SMALL (2x) */}
+        <div className="space-y-3 pb-1">
+          {/* Row 1: GREEN, VIOLET, RED */}
+          <div className="grid grid-cols-3 gap-2.5">
             <button
-              key={mult}
               type="button"
-              onClick={() => {
-                playSound('click');
-                setUiMultiplier(mult);
-              }}
-              className={`py-2 px-1 rounded-xl font-black text-[11px] sm:text-xs text-center transition-all border cursor-pointer ${
-                uiMultiplier === mult
-                  ? 'bg-rose-500 text-white border-rose-600 shadow-sm'
-                  : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-              }`}
+              disabled={timeLeft <= 5}
+              onClick={() => openBetDrawer('green')}
+              className="py-4 px-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-sm tracking-wide shadow-lg shadow-emerald-600/30 active:scale-98 transition-all disabled:opacity-40 flex flex-col items-center justify-center cursor-pointer font-display"
             >
-              X{mult}
+              <span className="text-base font-black">GREEN</span>
+              <span className="text-[11px] font-semibold opacity-90">2x</span>
             </button>
-          ))}
-        </div>
 
-        {/* 7. Big & Small Category Buttons (Orange Big, Light Blue Small like screenshots) */}
-        <div className="grid grid-cols-2 gap-3 pb-2">
-          <button
-            type="button"
-            disabled={timeLeft <= 5}
-            onClick={() => openBetDrawer('big')}
-            className="py-3.5 px-4 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black text-sm uppercase tracking-wider shadow-md active:scale-98 transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
-          >
-            <span>Big (5–9)</span>
-            <span className="text-[11px] opacity-90 font-bold">· 2.0X</span>
-          </button>
+            <button
+              type="button"
+              disabled={timeLeft <= 5}
+              onClick={() => openBetDrawer('purple')}
+              className="py-4 px-2 rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:from-purple-500 hover:to-fuchsia-500 text-white font-black text-sm tracking-wide shadow-lg shadow-purple-600/30 active:scale-98 transition-all disabled:opacity-40 flex flex-col items-center justify-center cursor-pointer font-display"
+            >
+              <span className="text-base font-black">VIOLET</span>
+              <span className="text-[11px] font-semibold opacity-90">3.5x</span>
+            </button>
 
-          <button
-            type="button"
-            disabled={timeLeft <= 5}
-            onClick={() => openBetDrawer('small')}
-            className="py-3.5 px-4 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-black text-sm uppercase tracking-wider shadow-md active:scale-98 transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
-          >
-            <span>Small (0–4)</span>
-            <span className="text-[11px] opacity-90 font-bold">· 2.0X</span>
-          </button>
+            <button
+              type="button"
+              disabled={timeLeft <= 5}
+              onClick={() => openBetDrawer('red')}
+              className="py-4 px-2 rounded-2xl bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 text-white font-black text-sm tracking-wide shadow-lg shadow-rose-600/30 active:scale-98 transition-all disabled:opacity-40 flex flex-col items-center justify-center cursor-pointer font-display"
+            >
+              <span className="text-base font-black">RED</span>
+              <span className="text-[11px] font-semibold opacity-90">2x</span>
+            </button>
+          </div>
+
+          {/* Row 2: BIG and SMALL (BIG must display only BIG; SMALL must display only SMALL. No extra text, symbols or numbers) */}
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              disabled={timeLeft <= 5}
+              onClick={() => openBetDrawer('big')}
+              className="py-4 px-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black text-base uppercase tracking-wider shadow-md active:scale-98 transition-all disabled:opacity-40 flex items-center justify-center cursor-pointer font-display"
+            >
+              <span>BIG</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={timeLeft <= 5}
+              onClick={() => openBetDrawer('small')}
+              className="py-4 px-4 rounded-2xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-black text-base uppercase tracking-wider shadow-md active:scale-98 transition-all disabled:opacity-40 flex items-center justify-center cursor-pointer font-display"
+            >
+              <span>SMALL</span>
+            </button>
+          </div>
+
+          {/* Quick Multiplier Bar */}
+          <div className="flex items-center justify-between gap-1.5 p-2 bg-slate-50 rounded-xl border border-slate-200">
+            <span className="text-[11px] font-extrabold uppercase text-slate-400 px-1">Order Multiplier:</span>
+            <div className="flex items-center gap-1.5 flex-1 justify-end">
+              {[1, 5, 10, 20, 50].map((mult) => (
+                <button
+                  key={mult}
+                  type="button"
+                  onClick={() => {
+                    playSound('click');
+                    setUiMultiplier(mult);
+                  }}
+                  className={`py-1.5 px-3 rounded-lg font-black text-xs text-center transition-all border cursor-pointer ${
+                    uiMultiplier === mult
+                      ? 'bg-rose-500 text-white border-rose-600 shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  X{mult}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Active orders indicator */}
@@ -1206,124 +1257,39 @@ export const ColorPredictionGame: React.FC = () => {
                       return (
                         <div
                           key={item.id || idx}
-                          className={`p-3 rounded-2xl border transition-all flex items-center justify-between shadow-2xs ${
+                          onClick={() => {
+                            playSound('click');
+                            setSelectedBetForDetail(item);
+                          }}
+                          className={`p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer hover:shadow-xs active:scale-[0.99] select-none ${
                             isPending
-                              ? 'bg-amber-50/80 border-amber-300 hover:border-amber-400'
+                              ? 'bg-amber-50/90 border-amber-300 hover:border-amber-400'
                               : isWin
-                              ? 'bg-emerald-50/70 border-emerald-300 hover:border-emerald-400'
-                              : 'bg-red-50/70 border-red-300 hover:border-red-400'
+                              ? 'bg-emerald-50/90 border-emerald-300 hover:border-emerald-400'
+                              : 'bg-red-50/90 border-red-300 hover:border-red-400'
                           }`}
                         >
-                          {/* Left: Icon, Target & Outcome */}
+                          {/* Simplified betting history: Main history shows only one compact status per bet */}
                           <div className="flex items-center gap-2.5">
-                            <div
-                              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
-                                isPending
-                                  ? 'bg-amber-100 border-amber-300 text-amber-700 shadow-xs'
-                                  : isWin
-                                  ? 'bg-emerald-100 border-emerald-300 text-emerald-700 shadow-xs'
-                                  : 'bg-red-100 border-red-300 text-red-700 shadow-xs'
-                              }`}
-                            >
-                              {isPending ? (
-                                <Clock className="w-4 h-4 text-amber-600 animate-pulse" />
-                              ) : isWin ? (
-                                <Trophy className="w-4 h-4 text-emerald-600" />
-                              ) : (
-                                <Frown className="w-4 h-4 text-red-600" />
-                              )}
-                            </div>
-
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-extrabold text-slate-900 text-xs sm:text-sm">
-                                  {item.choice}
-                                </span>
-                                {item.periodLabel && (
-                                  <span className="font-mono text-[10px] text-slate-500 bg-white px-1.5 py-0.2 rounded border border-slate-200">
-                                    {item.periodLabel}
-                                  </span>
-                                )}
-                                {item.gameId !== 'color-prediction' && (
-                                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
-                                    {item.gameTitle}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[11px] text-slate-600 mt-0.5 flex items-center gap-1.5">
-                                <span>
-                                  Outcome:{' '}
-                                  {isPending ? (
-                                    <strong className="text-amber-700">⏳ Waiting for Draw</strong>
-                                  ) : (
-                                    <strong className="text-slate-800">{item.outcome}</strong>
-                                  )}
-                                </span>
-                                <span>·</span>
-                                <span>Wager: ₹{item.betAmount.toLocaleString()}</span>
-                                {isWin && (
-                                  <>
-                                    <span>·</span>
-                                    <span className="text-amber-800 font-bold bg-amber-100/80 px-1 py-0.5 rounded text-[10px]">
-                                      Fee: 2.4%{item.commission ? ` (-₹${item.commission.toFixed(2)})` : ''}
-                                    </span>
-                                  </>
-                                )}
-                                <span className="hidden sm:inline">·</span>
-                                <span className="hidden sm:inline text-slate-400 text-[10px] font-mono">
-                                  {new Date(item.timestamp).toLocaleTimeString([], {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    second: '2-digit',
-                                  })}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Right: Status Badge & Return / Net Profit */}
-                          <div className="text-right shrink-0">
                             <span
-                              className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shadow-2xs ${
+                              className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-xs ${
                                 isPending
-                                  ? 'bg-amber-500 text-white border border-amber-600'
+                                  ? 'bg-amber-500 text-white'
                                   : isWin
-                                  ? 'bg-emerald-600 text-white border border-emerald-700'
-                                  : 'bg-red-600 text-white border border-red-700'
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-red-600 text-white'
                               }`}
                             >
                               {isPending ? 'PENDING' : isWin ? 'WIN' : 'LOSS'}
                             </span>
-                            <div
-                              className={`font-mono font-black text-xs sm:text-sm mt-1 tabular-nums ${
-                                isPending
-                                  ? 'text-amber-700'
-                                  : isWin
-                                  ? 'text-emerald-700'
-                                  : 'text-red-600'
-                              }`}
-                            >
-                              {isPending
-                                ? `₹${item.betAmount.toLocaleString()}`
-                                : isWin
-                                ? `+₹${item.payout.toLocaleString()}`
-                                : `-₹${item.betAmount.toLocaleString()}`}
-                            </div>
-                            <span
-                              className={`text-[10px] block font-mono font-bold ${
-                                isPending
-                                  ? 'text-slate-400'
-                                  : isWin
-                                  ? 'text-emerald-600'
-                                  : 'text-red-500'
-                              }`}
-                            >
-                              {isPending
-                                ? 'Net: ₹0'
-                                : isWin
-                                ? `Net: +₹${item.netProfit.toLocaleString()}`
-                                : `Net: -₹${item.betAmount.toLocaleString()}`}
+                            <span className="text-[11px] font-mono text-slate-600 font-bold">
+                              #{item.period ? item.period.slice(-4) : item.id.slice(-4)}
                             </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500">
+                            <span>Details</span>
+                            <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                           </div>
                         </div>
                       );
@@ -1333,7 +1299,7 @@ export const ColorPredictionGame: React.FC = () => {
                 <div className="py-10 text-center rounded-2xl bg-slate-50 border border-slate-200 text-slate-400 font-medium">
                   <p className="text-xs">No betting records match this filter.</p>
                   <p className="text-[11px] text-slate-400 mt-1">
-                    Place orders above on Green, Violet, Red, Big, Small, or Numbers to start your streak!
+                    Place orders above on BIG, SMALL, GREEN, VIOLET, or RED to start playing!
                   </p>
                 </div>
               )}
@@ -1591,46 +1557,40 @@ export const ColorPredictionGame: React.FC = () => {
 
             <div className="space-y-2.5 text-[11px] text-slate-600 leading-relaxed">
               <p>
-                <strong className="text-slate-900">1. Color Multipliers:</strong>
+                <strong className="text-slate-900">1. Five Betting Options &amp; Exact Multipliers:</strong>
                 <br />
-                • <strong>Green (1, 3, 7, 9):</strong> 2.0X return. If #5 draws, pays 1.5X.
+                • <strong>BIG:</strong> 2x Multiplier (Drawn numbers 5, 6, 7, 8, 9)
                 <br />
-                • <strong>Red (2, 4, 6, 8):</strong> 2.0X return. If #0 draws, pays 1.5X.
+                • <strong>SMALL:</strong> 2x Multiplier (Drawn numbers 0, 1, 2, 3, 4)
                 <br />
-                • <strong>Violet (0, 5):</strong> 4.5X return on dual-shade balls.
+                • <strong>GREEN:</strong> 2x Multiplier (Drawn numbers 1, 3, 5, 7, 9)
+                <br />
+                • <strong>RED:</strong> 2x Multiplier (Drawn numbers 0, 2, 4, 6, 8)
+                <br />
+                • <strong>VIOLET:</strong> 3.5x Multiplier (Drawn numbers 0 and 5)
               </p>
 
               <p>
-                <strong>2. Exact Number Draw (0–9):</strong>
+                <strong>2. Platform Winning Commission (2.4%):</strong>
                 <br />
-                Predicting the exact single digit yields a massive <strong>9.0X Multiplier</strong>.
+                • A 2.4% platform commission is deducted on every gross winning payout.
+                <br />
+                • Calculation: Gross Winning Amount - (Gross × 2.4%) = Net Credited Amount.
+                <br />
+                • No commission is charged on losing bets.
               </p>
 
               <p>
-                <strong>3. Size Categories:</strong>
+                <strong>3. Timing &amp; Countdown:</strong>
                 <br />
-                • <strong>Big:</strong> Numbers 5, 6, 7, 8, 9 (2.0X Multiplier).
-                <br />
-                • <strong>Small:</strong> Numbers 0, 1, 2, 3, 4 (2.0X Multiplier).
-              </p>
-
-              <p>
-                <strong>4. Platform Service Fee:</strong>
-                <br />
-                • A standard <strong>2.4% commission</strong> is automatically deducted from every winning payout.
-              </p>
-
-              <p>
-                <strong>5. Timing & Settlement:</strong>
-                <br />
-                Orders remain open until 5 seconds prior to resolution. The outcome is generated by browser RNG and settled instantly to your virtual balance.
+                • Orders are open until 5 seconds prior to draw. During the final 5 seconds, an audio beep sequence guides the countdown and results resolve automatically.
               </p>
             </div>
 
             <button
               type="button"
               onClick={() => setShowHowToPlay(false)}
-              className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs mt-2 transition-colors cursor-pointer"
+              className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs mt-2 transition-colors cursor-pointer"
             >
               Close Rules
             </button>
@@ -1638,16 +1598,30 @@ export const ColorPredictionGame: React.FC = () => {
         </div>
       )}
 
-      {/* Result Outcome Modal */}
-      <WinModal
-        isOpen={winModalState.isOpen}
-        isWin={winModalState.isWin}
-        payout={winModalState.payout}
-        betAmount={winModalState.betAmount}
-        multiplier={winModalState.multiplier}
-        resultMessage={winModalState.message}
-        onPlayAgain={() => setWinModalState((prev) => ({ ...prev, isOpen: false }))}
-        onClose={() => setWinModalState((prev) => ({ ...prev, isOpen: false }))}
+      {/* Requirement 7: Green Bet Placed Successfully Notification */}
+      <BetPlacedToast
+        show={showBetPlacedToast}
+        onClose={() => setShowBetPlacedToast(false)}
+        message="BET PLACED SUCCESSFULLY"
+        durationMs={2800}
+      />
+
+      {/* Requirement 4: Win Congratulations Poster (Green Theme) */}
+      <WinPosterModal
+        data={winPosterData}
+        onClose={() => setWinPosterData((prev) => ({ ...prev, isOpen: false }))}
+      />
+
+      {/* Requirement 6: Loss Unfortunately Poster (Red Theme) */}
+      <LossPosterModal
+        data={lossPosterData}
+        onClose={() => setLossPosterData((prev) => ({ ...prev, isOpen: false }))}
+      />
+
+      {/* Requirement 3: Detailed Bet History Popup */}
+      <BetDetailModal
+        item={selectedBetForDetail}
+        onClose={() => setSelectedBetForDetail(null)}
       />
     </div>
   );

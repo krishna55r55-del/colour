@@ -102,7 +102,10 @@ interface GameContextType {
   setWinManagerEnabled: (enabled: boolean) => void;
   resetBalance: () => void;
   clearHistory: () => void;
-  playSound: (type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss') => void;
+  playSound: (
+    type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss' | 'countdown_beep' | 'round_end',
+    arg?: number
+  ) => void;
   dailyBonus: DailyBonusState;
   claimDailyBonus: () => { success: boolean; amount: number; day: number; error?: string };
   canClaimDailyBonus: boolean;
@@ -642,9 +645,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
   }, [soundEnabled]);
 
-  const playSound = (type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss') => {
+  const playSound = (
+    type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss' | 'countdown_beep' | 'round_end',
+    arg?: number
+  ) => {
     if (soundEnabled) {
-      soundManager.play(type);
+      soundManager.play(type, arg);
     }
   };
 
@@ -931,6 +937,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       target: String(order.target),
       multiplier: order.multiplier,
       duration: order.duration,
+      selectedOption: order.selectedOption || String(order.target).toUpperCase(),
+      grossPayout: 0,
+      commission: 0,
     };
 
     setHistory((prev) => {
@@ -1060,9 +1069,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           status: 'Completed' as const,
           outcome: outcomeText,
           payout: evalRes.payout,
+          grossPayout: evalRes.grossPayout,
           commission: evalRes.commission,
           netProfit: evalRes.netProfit,
           isWin: evalRes.isWin,
+          resultNumber: drawnNum,
+          resultColor: evalRes.resultColor,
+          selectedOption: evalRes.selectedOption || String(item.target).toUpperCase(),
           settledAt: roundEndTime,
         };
       });

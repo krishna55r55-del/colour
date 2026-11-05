@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Filter, Play, ArrowUpDown, Palette, Dices, Crown, Sparkles, Coins, Zap, Trophy, Layers } from 'lucide-react';
+import { Search, Filter, Play, ArrowUpDown, Palette, Dices, Sparkles, Coins, Zap, Trophy, Layers } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { ALL_GAMES } from '../../data/games';
 import { GameCategory, GameId } from '../../types';
@@ -13,7 +13,7 @@ export const AllGamesView: React.FC = () => {
   const [sortBy, setSortBy] = useState<'default' | 'multiplier' | 'minBet'>('default');
 
   const categories: Array<{ id: GameCategory | 'all'; label: string }> = [
-    { id: 'all', label: 'All Games (10)' },
+    { id: 'all', label: 'All Games (9)' },
     { id: 'prediction', label: 'Predictions' },
     { id: 'dice_cards', label: 'Dice & Cards' },
     { id: 'luck_wheels', label: 'Luck & Wheels' },
@@ -47,7 +47,6 @@ export const AllGamesView: React.FC = () => {
     switch (gameId) {
       case 'color-prediction': return <Palette className="w-5 h-5 text-purple-400" />;
       case 'dice-roll': return <Dices className="w-5 h-5 text-cyan-400" />;
-      case 'dragon-tiger': return <Crown className="w-5 h-5 text-amber-400" />;
       case 'lucky-number': return <Sparkles className="w-5 h-5 text-emerald-400" />;
       case 'coin-flip': return <Coins className="w-5 h-5 text-yellow-400" />;
       case 'number-prediction': return <Zap className="w-5 h-5 text-indigo-400" />;
@@ -68,7 +67,7 @@ export const AllGamesView: React.FC = () => {
             Catalog & Games
           </span>
           <h1 className="text-2xl sm:text-3xl font-black font-display text-slate-900 mt-1">
-            All 10 Games
+            All 9 Games
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
             Choose from high-speed predictions, dice rolls, table cards, and wheel jackpots.
@@ -88,7 +87,7 @@ export const AllGamesView: React.FC = () => {
         </div>
       </div>
 
-      {/* Global 24/7 Continuous Draws Across All 10 Games */}
+      {/* Global 24/7 Continuous Draws Across All 9 Games */}
       <GlobalContinuousDrawsTicker />
 
       {/* Filter and Sort Toolbar */}

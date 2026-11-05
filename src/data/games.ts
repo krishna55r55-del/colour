@@ -5,20 +5,21 @@ export const ALL_GAMES: GameMetadata[] = [
     id: 'color-prediction',
     title: 'Color Prediction',
     category: 'prediction',
-    categoryLabel: 'Color & Numbers',
-    description: 'Predict whether the next lucky outcome will land on Red, Green, or rare Violet.',
-    tagline: 'Predict colors & win up to 4.5x',
+    categoryLabel: 'Color & Size',
+    description: 'Predict whether the next outcome will land on BIG, SMALL, GREEN, VIOLET, or RED.',
+    tagline: '5 Betting options with up to 3.5x multipliers',
     badge: 'Popular',
-    maxMultiplier: '4.5x',
+    maxMultiplier: '3.5x',
     minBet: 10,
     featured: true,
     accentColor: 'purple',
     rules: [
-      'Choose your prediction: Green (2x), Red (2x), or Violet (4.5x).',
-      'You can also pick specific lucky numbers (0–9) for massive 9x payouts.',
-      'Numbers 1, 3, 7, 9 are Green; 2, 4, 6, 8 are Red.',
-      'Numbers 0 & 5 combine Violet with Red and Green respectively.',
-      'Place your bet and hit Spin/Reveal to view the provably fair result.'
+      'Choose from 5 betting options: BIG (2x), SMALL (2x), GREEN (2x), RED (2x), or VIOLET (3.5x).',
+      'BIG pays 2x on numbers 5, 6, 7, 8, 9.',
+      'SMALL pays 2x on numbers 0, 1, 2, 3, 4.',
+      'GREEN pays 2x on numbers 1, 3, 5, 7, 9; RED pays 2x on numbers 0, 2, 4, 6, 8.',
+      'VIOLET pays 3.5x on dual-shade numbers 0 and 5.',
+      'A 2.4% platform commission is automatically deducted from gross winning amounts.'
     ]
   },
   {
@@ -38,25 +39,6 @@ export const ALL_GAMES: GameMetadata[] = [
       'In 2-dice mode, predict Under 7 (2.4x), Exact 7 (5.8x), or Over 7 (2.4x).',
       'Or try the Exact Doubles bet (Snake Eyes 1-1 or Double Sixes 6-6 for 6x!).',
       'Watch the dice shake and tumble with real physics.'
-    ]
-  },
-  {
-    id: 'dragon-tiger',
-    title: 'Dragon Tiger',
-    category: 'dice_cards',
-    categoryLabel: 'Cards Table',
-    description: 'The ultra-fast card showdown. Dragon vs Tiger: highest rank takes the round.',
-    tagline: 'High-speed 2-card showdown',
-    badge: 'Trending',
-    maxMultiplier: '9.0x',
-    minBet: 10,
-    featured: true,
-    accentColor: 'amber',
-    rules: [
-      'Bet on Dragon (2x), Tiger (2x), or a dramatic Tie (9x payout!).',
-      'One card is dealt to Dragon and one to Tiger.',
-      'Card values rank from Ace (1, lowest) to King (13, highest). Suit does not break ties.',
-      'If both cards share the exact rank, Tie bets win 9x!'
     ]
   },
   {

@@ -13,8 +13,11 @@ import {
   Coins,
   DollarSign,
   TrendingUp,
+  ChevronRight,
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
+import { BetDetailModal } from '../common/BetDetailModal';
+import { GameHistoryItem } from '../../types';
 
 export const HistoryView: React.FC = () => {
   const {
@@ -28,6 +31,9 @@ export const HistoryView: React.FC = () => {
 
   // Top view tab: Personal history vs Master Player Records ("My Records")
   const [activeTab, setActiveTab] = useState<'personal' | 'master'>('personal');
+
+  // Selected bet item for detailed popup
+  const [selectedBetForDetail, setSelectedBetForDetail] = useState<GameHistoryItem | null>(null);
 
   // Filter for Personal History
   const [personalFilter, setPersonalFilter] = useState<'all' | 'wins' | 'losses'>('all');
@@ -318,74 +324,38 @@ export const HistoryView: React.FC = () => {
             )}
           </div>
 
-          {/* History Log List */}
+          {/* Simplified History Log List: Main history shows only one compact status per bet */}
           {filteredPersonalHistory.length > 0 ? (
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               {filteredPersonalHistory.map((item) => (
                 <div
                   key={item.id}
-                  className={`p-3.5 sm:p-4 rounded-2xl border transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs ${
+                  onClick={() => {
+                    playSound('click');
+                    setSelectedBetForDetail(item);
+                  }}
+                  className={`p-3 sm:p-3.5 rounded-2xl border transition-all flex items-center justify-between cursor-pointer hover:shadow-xs active:scale-[0.99] select-none ${
                     item.isWin
-                      ? 'bg-emerald-50/50 border-emerald-200/90 hover:border-emerald-300'
-                      : 'bg-red-50/50 border-red-200/90 hover:border-red-300'
+                      ? 'bg-emerald-50/90 border-emerald-300 hover:border-emerald-400'
+                      : 'bg-red-50/90 border-red-300 hover:border-red-400'
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <div
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
-                        item.isWin
-                          ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
-                          : 'bg-red-100 border-red-300 text-red-700'
+                    <span
+                      className={`px-3.5 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-xs ${
+                        item.isWin ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
                       }`}
                     >
-                      {item.isWin ? <Trophy className="w-4 h-4 text-emerald-600" /> : <Frown className="w-4 h-4 text-red-600" />}
-                    </div>
-
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-900 text-sm">{item.gameTitle}</span>
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                            item.isWin
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-red-600 text-white'
-                          }`}
-                        >
-                          {item.isWin ? 'WIN' : 'LOSS'}
-                        </span>
-                      </div>
-                      <div className="text-slate-500 text-[11px] flex items-center gap-2 mt-0.5">
-                        <span>
-                          Choice: <strong className="text-slate-800">{item.choice}</strong>
-                        </span>
-                        <span>·</span>
-                        <span>
-                          Result: <span className="text-slate-700 font-semibold">{item.outcome}</span>
-                        </span>
-                      </div>
-                    </div>
+                      {item.isWin ? 'WIN' : 'LOSS'}
+                    </span>
+                    <span className="font-mono text-xs font-bold text-slate-700">
+                      #{item.period ? item.period.slice(-4) : item.id.slice(-4)}
+                    </span>
                   </div>
 
-                  <div className="flex items-center justify-between sm:justify-end gap-6 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-                    <div className="text-left sm:text-right">
-                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Wager</span>
-                      <span className="font-bold text-slate-700 tabular-nums">₹{item.betAmount}</span>
-                    </div>
-
-                    <div className="text-right min-w-[85px]">
-                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Payout</span>
-                      <span
-                        className={`font-black font-mono tabular-nums text-sm ${
-                          item.isWin ? 'text-emerald-700' : 'text-red-600'
-                        }`}
-                      >
-                        {item.isWin ? `+₹${item.payout.toLocaleString()}` : `-₹${item.betAmount.toLocaleString()}`}
-                      </span>
-                    </div>
-
-                    <div className="text-[10px] text-slate-400 font-mono hidden md:block">
-                      {formatDate(item.timestamp)}
-                    </div>
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+                    <span>View Details</span>
+                    <ChevronRight className="w-4 h-4 text-slate-400" />
                   </div>
                 </div>
               ))}
@@ -558,10 +528,9 @@ export const HistoryView: React.FC = () => {
                   onChange={(e) => setGameFilter(e.target.value)}
                   className="px-3 py-1 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-amber-500"
                 >
-                  <option value="all">All 10 Games</option>
+                  <option value="all">All 9 Games</option>
                   <option value="color-prediction">Win Go (Color Prediction)</option>
                   <option value="dice-roll">Dice Roll</option>
-                  <option value="dragon-tiger">Dragon Tiger</option>
                   <option value="lucky-number">Lucky Number</option>
                   <option value="coin-flip">Coin Flip</option>
                   <option value="number-prediction">Number Prediction</option>
@@ -671,6 +640,12 @@ export const HistoryView: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* Bet Detail Popup on clicking WIN / LOSS */}
+      <BetDetailModal
+        item={selectedBetForDetail}
+        onClose={() => setSelectedBetForDetail(null)}
+      />
     </div>
   );
 };

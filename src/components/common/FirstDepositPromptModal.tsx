@@ -61,7 +61,7 @@ export const FirstDepositPromptModal: React.FC = () => {
         </h2>
 
         <p className="text-xs text-slate-500 leading-relaxed max-w-xs mx-auto mb-5">
-          Your account has been credited with <strong className="text-slate-800">₹98 Registration Bonus</strong>. Complete your 1st deposit to unlock instant betting on all 10 games!
+          Your account has been credited with <strong className="text-slate-800">₹98 Registration Bonus</strong>. Complete your 1st deposit to unlock instant betting on all 9 games!
         </p>
 
         {/* Info Card */}

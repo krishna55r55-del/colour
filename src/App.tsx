@@ -16,10 +16,9 @@ import { DepositView } from './components/views/DepositView';
 import { WithdrawView } from './components/views/WithdrawView';
 import { AdminApprovalView } from './components/views/AdminApprovalView';
 
-// 10 Playable Games
+// 9 Playable Games
 import { ColorPredictionGame } from './components/games/ColorPredictionGame';
 import { DiceRollGame } from './components/games/DiceRollGame';
-import { DragonTigerGame } from './components/games/DragonTigerGame';
 import { LuckyNumberGame } from './components/games/LuckyNumberGame';
 import { CoinFlipGame } from './components/games/CoinFlipGame';
 import { NumberPredictionGame } from './components/games/NumberPredictionGame';
@@ -45,8 +44,6 @@ const AppContent: React.FC = () => {
         return <ColorPredictionGame />;
       case 'dice-roll':
         return <DiceRollGame />;
-      case 'dragon-tiger':
-        return <DragonTigerGame />;
       case 'lucky-number':
         return <LuckyNumberGame />;
       case 'coin-flip':
