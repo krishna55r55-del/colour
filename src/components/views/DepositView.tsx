@@ -30,6 +30,7 @@ export const DepositView: React.FC = () => {
     submitDepositRequest,
     playSound,
     setActiveView,
+    hasCompletedFirstDeposit,
   } = useGame();
 
   // Recharge Form State
@@ -231,7 +232,24 @@ export const DepositView: React.FC = () => {
           </div>
         </div>
       </div>
-        <div className="space-y-6">
+
+      {!hasCompletedFirstDeposit && (
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-600 to-red-600 text-white shadow-md border border-amber-300/40 flex items-center gap-3.5 animate-in fade-in duration-200">
+          <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center shrink-0 border border-white/30 text-amber-200">
+            <Sparkles className="w-5 h-5 animate-pulse" />
+          </div>
+          <div className="text-xs">
+            <div className="font-black text-amber-300 uppercase tracking-wide">
+              Deposit 1 time to play with bonus money
+            </div>
+            <div className="text-white/90 text-[11px] mt-0.5">
+              Your registered balance has ₹98 bonus ready. Complete your 1st deposit to unlock instant betting on all 10 games!
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-6">
           {/* Wallet Balance Hero Card */}
           <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-[#e52e2e] via-[#f53b3b] to-[#ff5252] text-white shadow-lg relative overflow-hidden">
             <div className="relative z-10">

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Dices, Play } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
+import { ContinuousGameLiveHeader } from '../common/ContinuousGameLiveHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
 import { isBetAlwaysWin } from '../../utils/winLogic';
@@ -203,6 +204,8 @@ export const DiceRollGame: React.FC = () => {
       <GameModalHeader gameId="dice-roll" />
 
       <div className="p-4 sm:p-6 space-y-6">
+        <ContinuousGameLiveHeader gameId="dice-roll" />
+
         {/* Mode Selector */}
         <div className="flex justify-center">
           <div className="p-1 rounded-2xl bg-slate-900 border border-slate-800 inline-flex">

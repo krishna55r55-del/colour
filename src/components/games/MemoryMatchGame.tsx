@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Play, Sparkles, Gamepad2, Diamond, Crown, Skull, Rocket, Zap, RotateCcw } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
+import { ContinuousGameLiveHeader } from '../common/ContinuousGameLiveHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
 import { isBetAlwaysWin } from '../../utils/winLogic';
@@ -229,6 +230,8 @@ export const MemoryMatchGame: React.FC = () => {
       <GameModalHeader gameId="memory-match" />
 
       <div className="p-4 sm:p-6 space-y-6">
+        <ContinuousGameLiveHeader gameId="memory-match" />
+
         {/* Game Stats Tracker */}
         <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
           <div className="flex items-center gap-2">

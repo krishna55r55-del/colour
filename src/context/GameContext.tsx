@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
 import {
   GameId,
   GameHistoryItem,
@@ -111,6 +111,10 @@ interface GameContextType {
   setIsDailyBonusModalOpen: (open: boolean) => void;
   masterPlayerBets: PlayerBetRecord[];
   refreshMasterPlayerBets: () => Promise<void>;
+  hasCompletedFirstDeposit: boolean;
+  showFirstDepositPrompt: boolean;
+  setShowFirstDepositPrompt: (open: boolean) => void;
+  firstDepositPromptMessage: string;
 }
 
 export const DAILY_BONUS_TIERS = [
@@ -144,7 +148,8 @@ export const defaultDailyBonus: DailyBonusState = {
 // User-scoped storage key helper
 const getUserKey = (phone: string, key: string) => `cobclub_${key}_${phone}`;
 
-const INITIAL_BALANCE = 1000;
+// Initial balance for new registers: strictly 98 rupees bonus money
+const INITIAL_BALANCE = 98;
 
 const defaultStats: UserStats = {
   totalRounds: 0,
@@ -294,6 +299,25 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [activeView, setActiveView] = useState<ViewType>('home');
   const [selectedGameId, setSelectedGameId] = useState<GameId | null>(null);
+
+  // First deposit requirement state: Player starts with ₹98 bonus money and must complete 1st deposit to unlock play
+  const [showFirstDepositPrompt, setShowFirstDepositPrompt] = useState<boolean>(false);
+  const [firstDepositPromptMessage, setFirstDepositPromptMessage] = useState<string>(
+    'Deposit 1 time to play with bonus money'
+  );
+
+  const hasCompletedFirstDeposit = useMemo(() => {
+    if (!user?.phoneNumber) return false;
+    const phone = user.phoneNumber;
+    const hasCompletedRecord = depositRecords.some((d) => d.status === 'Completed');
+    if (hasCompletedRecord) return true;
+    try {
+      const persistentFlag = localStorage.getItem(getUserKey(phone, 'has_deposited'));
+      return persistentFlag === 'true';
+    } catch {
+      return false;
+    }
+  }, [user?.phoneNumber, depositRecords]);
 
   // Win Manager state: strictly defaults to OFF (false) as requested ("Winning button default off Rahe")
   const [winManagerEnabled, setWinManagerEnabled] = useState<boolean>(false);
@@ -808,17 +832,34 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const selectGame = (id: GameId | null) => {
-    setSelectedGameId(id);
     if (id) {
+      if (!hasCompletedFirstDeposit) {
+        setFirstDepositPromptMessage('Deposit 1 time to play with bonus money');
+        setShowFirstDepositPrompt(true);
+        setActiveView('deposit');
+        setSelectedGameId(null);
+        playSound('loss');
+        return;
+      }
+      setSelectedGameId(id);
       setRecentlyPlayed((prev) => {
         const filtered = prev.filter((g) => g !== id);
         return [id, ...filtered].slice(0, 5);
       });
       window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      setSelectedGameId(null);
     }
   };
 
   const placeBet = (amount: number): boolean => {
+    if (!hasCompletedFirstDeposit) {
+      setFirstDepositPromptMessage('Deposit 1 time to play with bonus money');
+      setShowFirstDepositPrompt(true);
+      setActiveView('deposit');
+      playSound('loss');
+      return false;
+    }
     if (amount <= 0 || balance < amount) {
       return false;
     }
@@ -844,6 +885,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Submit a continuous WinGo bet: immediately deducts wager, creates pending record with unique ID,
   // syncs to Supabase bet_history, and guarantees the bet is never cancelled on navigation or reload
   const submitWinGoBet = (order: WinGoBetOrderInput): { success: boolean; betId?: string; error?: string } => {
+    if (!hasCompletedFirstDeposit) {
+      setFirstDepositPromptMessage('Deposit 1 time to play with bonus money');
+      setShowFirstDepositPrompt(true);
+      setActiveView('deposit');
+      playSound('loss');
+      return { success: false, error: 'Deposit 1 time to play with bonus money' };
+    }
     if (order.amount <= 0) {
       return { success: false, error: 'Invalid bet amount' };
     }
@@ -1398,6 +1446,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (user) {
         try {
           localStorage.setItem(getUserKey(user.phoneNumber, 'balance'), nextBal.toString());
+          localStorage.setItem(getUserKey(user.phoneNumber, 'has_deposited'), 'true');
           const userDeps = depositRecords.map((d) => (d.id === req.id ? updatedReq : d));
           localStorage.setItem(getUserKey(user.phoneNumber, 'deposits'), JSON.stringify(userDeps));
         } catch {}
@@ -1412,6 +1461,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const currentBal = savedBal !== null ? Math.max(0, parseInt(savedBal, 10)) : INITIAL_BALANCE;
           const nextBal = currentBal + req.totalCredit;
           localStorage.setItem(getUserKey(targetPhone, 'balance'), nextBal.toString());
+          localStorage.setItem(getUserKey(targetPhone, 'has_deposited'), 'true');
 
           const rawDeps = localStorage.getItem(getUserKey(targetPhone, 'deposits'));
           const list: DepositRecord[] = rawDeps ? JSON.parse(rawDeps) : [];
@@ -1639,6 +1689,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsDailyBonusModalOpen,
         masterPlayerBets,
         refreshMasterPlayerBets,
+        hasCompletedFirstDeposit,
+        showFirstDepositPrompt,
+        setShowFirstDepositPrompt,
+        firstDepositPromptMessage,
       }}
     >
       {children}

@@ -369,6 +369,17 @@ export const AuthPage: React.FC = () => {
           {/* Form: REGISTER */}
           {activeTab === 'register' && (
             <form onSubmit={handleRegister} className="space-y-3.5">
+              {/* Registration ₹98 Bonus Callout */}
+              <div className="p-3 rounded-2xl bg-gradient-to-r from-amber-50 to-rose-50 border border-amber-300 flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center shrink-0 font-black text-xs shadow-xs">
+                  ₹98
+                </div>
+                <div className="text-[11px] leading-tight">
+                  <span className="font-bold text-slate-900 block">₹98 Bonus Credited on Register!</span>
+                  <span className="text-slate-500">Deposit 1 time to unlock and play with bonus money.</span>
+                </div>
+              </div>
+
               {/* Phone Number Field */}
               <div className="space-y-1">
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">

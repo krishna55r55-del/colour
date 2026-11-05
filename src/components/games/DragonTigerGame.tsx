@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Play, Sparkles } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
+import { ContinuousGameLiveHeader } from '../common/ContinuousGameLiveHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
 import { isBetAlwaysWin } from '../../utils/winLogic';
@@ -196,6 +197,8 @@ export const DragonTigerGame: React.FC = () => {
       <GameModalHeader gameId="dragon-tiger" />
 
       <div className="p-4 sm:p-6 space-y-6">
+        <ContinuousGameLiveHeader gameId="dragon-tiger" />
+
         {/* Road Map Bar */}
         <div>
           <div className="flex items-center justify-between text-xs text-slate-400 mb-2">

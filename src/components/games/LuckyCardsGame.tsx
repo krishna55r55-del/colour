@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Play, Sparkles, Crown } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
+import { ContinuousGameLiveHeader } from '../common/ContinuousGameLiveHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
 import { isBetAlwaysWin } from '../../utils/winLogic';
@@ -128,6 +129,8 @@ export const LuckyCardsGame: React.FC = () => {
       <GameModalHeader gameId="lucky-cards" />
 
       <div className="p-4 sm:p-6 space-y-6">
+        <ContinuousGameLiveHeader gameId="lucky-cards" />
+
         {/* Status prompt */}
         <div className="text-center text-xs font-semibold text-slate-400">
           {!isPlaying && !isRevealed && 'Place your bet and hit Deal Cards to begin'}

@@ -428,7 +428,7 @@ export const HomeView: React.FC = () => {
               </div>
               <h4 className="text-sm font-bold text-slate-900">Always Available Credits</h4>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Seamless gameplay guaranteed. Restore your starting 1,000 balance in profile whenever needed.
+                Seamless gameplay guaranteed. Instant balance replenishment & withdrawals via deposit dashboard.
               </p>
             </div>
 

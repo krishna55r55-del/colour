@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ArrowUp, ArrowDown, Equal, Play, Sparkles } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
+import { ContinuousGameLiveHeader } from '../common/ContinuousGameLiveHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
 import { isBetAlwaysWin } from '../../utils/winLogic';
@@ -137,6 +138,8 @@ export const NumberPredictionGame: React.FC = () => {
       <GameModalHeader gameId="number-prediction" />
 
       <div className="p-4 sm:p-6 space-y-6">
+        <ContinuousGameLiveHeader gameId="number-prediction" />
+
         {/* Streak Counter Header */}
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span>High or Low Ladder</span>

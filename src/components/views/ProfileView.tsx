@@ -2,21 +2,14 @@ import React, { useState } from 'react';
 import {
   User,
   Crown,
-  Trophy,
   Coins,
-  Gift,
   Volume2,
   VolumeX,
-  Award,
-  Zap,
-  CheckCircle,
-  ShieldCheck,
   LogOut,
   Lock,
   X,
   Building,
   ArrowRight,
-  Users,
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 
@@ -34,10 +27,6 @@ export const ProfileView: React.FC = () => {
     setWinManagerEnabled,
     savedBankDetails,
     withdrawRecords,
-    dailyBonus,
-    canClaimDailyBonus,
-    setIsDailyBonusModalOpen,
-    masterPlayerBets,
     masterDepositRequests,
   } = useGame();
 
@@ -92,7 +81,6 @@ export const ProfileView: React.FC = () => {
   };
 
   const rank = getRank(stats.totalRounds);
-  const winRate = stats.totalRounds > 0 ? Math.round((stats.totalWins / stats.totalRounds) * 100) : 0;
 
   const handleToggleClick = () => {
     playSound('click');
@@ -118,46 +106,6 @@ export const ProfileView: React.FC = () => {
       playSound('loss');
     }
   };
-
-  // Gaming Achievements badges
-  const achievements = [
-    {
-      title: 'First Victory',
-      desc: 'Win your first game round',
-      unlocked: stats.totalWins >= 1,
-      icon: Trophy,
-    },
-    {
-      title: 'High Roller',
-      desc: 'Wager 500+ in total',
-      unlocked: stats.totalWagered >= 500,
-      icon: Coins,
-    },
-    {
-      title: 'Streak Master',
-      desc: 'Achieve a 3+ round win streak',
-      unlocked: stats.bestStreak >= 3,
-      icon: Zap,
-    },
-    {
-      title: 'Centurion',
-      desc: 'Play 10 total rounds',
-      unlocked: stats.totalRounds >= 10,
-      icon: Award,
-    },
-    {
-      title: 'Big Winner',
-      desc: 'Win 200+ in a single round',
-      unlocked: stats.biggestWin >= 200,
-      icon: Crown,
-    },
-    {
-      title: 'Platform Veteran',
-      desc: 'Maintain 40%+ win rate',
-      unlocked: stats.totalRounds >= 5 && winRate >= 40,
-      icon: ShieldCheck,
-    },
-  ];
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
@@ -288,188 +236,6 @@ export const ProfileView: React.FC = () => {
           <span>{savedBankDetails ? 'Manage Bank Account' : 'Add Bank Details'}</span>
           <ArrowRight className="w-3.5 h-3.5 text-amber-600" />
         </button>
-      </div>
-
-      {/* Daily Login Bonus Rewards Card */}
-      <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div
-            className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
-              canClaimDailyBonus
-                ? 'bg-amber-100 border border-amber-300 text-amber-600 animate-pulse'
-                : 'bg-rose-50 border border-rose-200 text-rose-600'
-            }`}
-          >
-            <Gift className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">
-                Daily Login Bonus
-              </span>
-              <span
-                className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-                  canClaimDailyBonus
-                    ? 'bg-amber-100 text-amber-900 border border-amber-300 animate-bounce'
-                    : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                }`}
-              >
-                {canClaimDailyBonus ? '★ Ready to Claim' : '✓ Claimed Today'}
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Streak: <strong className="text-slate-800">Day {dailyBonus.streak || 0} of 7</strong> · Total Claimed: <strong className="text-emerald-600">₹{(dailyBonus.totalClaimed || 0).toLocaleString()}</strong> points
-            </p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => {
-            playSound('click');
-            setIsDailyBonusModalOpen(true);
-          }}
-          className={`px-4 py-2.5 rounded-full text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs ${
-            canClaimDailyBonus
-              ? 'bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white shadow-md'
-              : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
-          }`}
-        >
-          <span>{canClaimDailyBonus ? 'Claim Daily Points' : 'Bonus Calendar'}</span>
-          <ArrowRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {/* Master Player Records ("My Records") Platform Overview Card */}
-      <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shrink-0">
-            <Users className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">
-                👑 Master Player Records (My Records)
-              </span>
-              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-900 text-amber-300">
-                {masterPlayerBets.length} Bets Saved
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Every player&apos;s bets and round outcomes are automatically archived here and synced to your database.
-            </p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => {
-            playSound('click');
-            setActiveView('history');
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          }}
-          className="px-4 py-2.5 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 border border-amber-400 text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
-        >
-          <span>Open Player Records</span>
-          <ArrowRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-
-
-      {/* Player Career Stats */}
-      <div>
-        <h2 className="text-lg font-black font-display text-slate-900 mb-3">
-          Game Statistics
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-          <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-              Total Rounds
-            </span>
-            <div className="text-2xl font-black text-slate-900 font-mono mt-1 tabular-nums">
-              {stats.totalRounds}
-            </div>
-            <span className="text-[11px] text-slate-400 mt-0.5 block">
-              W: {stats.totalWins} · L: {stats.totalLosses}
-            </span>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-              Win Rate
-            </span>
-            <div className="text-2xl font-black text-rose-600 font-mono mt-1 tabular-nums">
-              {winRate}%
-            </div>
-            <span className="text-[11px] text-slate-400 mt-0.5 block">
-              Efficiency rate
-            </span>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-              Peak Single Win
-            </span>
-            <div className="text-2xl font-black text-emerald-600 font-mono mt-1 tabular-nums">
-              +₹{stats.biggestWin.toLocaleString()}
-            </div>
-            <span className="text-[11px] text-slate-400 mt-0.5 block">
-              Record payout
-            </span>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-              Best Streak
-            </span>
-            <div className="text-2xl font-black text-blue-600 font-mono mt-1 tabular-nums">
-              {stats.bestStreak}
-            </div>
-            <span className="text-[11px] text-slate-400 mt-0.5 block">
-              Current: {stats.currentStreak}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Achievements Badges Grid */}
-      <div>
-        <h2 className="text-lg font-black font-display text-slate-900 mb-3">
-          Achievements & Badges
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-          {achievements.map((ach, i) => {
-            const Icon = ach.icon;
-            return (
-              <div
-                key={i}
-                className={`p-4 rounded-2xl border transition-all flex items-start gap-3.5 ${
-                  ach.unlocked
-                    ? 'bg-white border-rose-200 shadow-xs'
-                    : 'bg-slate-50 border-slate-200 opacity-60'
-                }`}
-              >
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                  ach.unlocked
-                    ? 'bg-rose-50 text-rose-600 border border-rose-200'
-                    : 'bg-slate-200 text-slate-400'
-                }`}>
-                  <Icon className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5 font-bold text-slate-900 text-xs">
-                    <span>{ach.title}</span>
-                    {ach.unlocked && <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />}
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    {ach.desc}
-                  </p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </div>
 
       {/* Settings & Preferences */}

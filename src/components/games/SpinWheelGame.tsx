@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Play, Sparkles, Trophy } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
+import { ContinuousGameLiveHeader } from '../common/ContinuousGameLiveHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
 import { isBetAlwaysWin } from '../../utils/winLogic';
@@ -146,6 +147,8 @@ export const SpinWheelGame: React.FC = () => {
       <GameModalHeader gameId="spin-wheel" />
 
       <div className="p-4 sm:p-6 space-y-6">
+        <ContinuousGameLiveHeader gameId="spin-wheel" />
+
         {/* Wheel Arena */}
         <div className="relative py-8 px-4 rounded-3xl bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-green-500/30 flex flex-col items-center justify-center overflow-hidden">
           {/* Wheel Pointer / Stopper Arrow */}

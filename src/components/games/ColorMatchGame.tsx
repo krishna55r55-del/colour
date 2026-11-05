@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Play, Sparkles, Check, Palette } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { GameModalHeader } from '../common/GameModalHeader';
+import { ContinuousGameLiveHeader } from '../common/ContinuousGameLiveHeader';
 import { BetControls } from '../common/BetControls';
 import { WinModal } from '../common/WinModal';
 import { isBetAlwaysWin } from '../../utils/winLogic';
@@ -167,6 +168,8 @@ export const ColorMatchGame: React.FC = () => {
       <GameModalHeader gameId="color-match" />
 
       <div className="p-4 sm:p-6 space-y-6">
+        <ContinuousGameLiveHeader gameId="color-match" />
+
         {/* Target Color Broadcast Box */}
         <div className="relative py-8 px-4 rounded-3xl bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-purple-500/30 flex flex-col items-center justify-center text-center">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">

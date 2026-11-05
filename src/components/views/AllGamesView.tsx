@@ -3,6 +3,7 @@ import { Search, Filter, Play, ArrowUpDown, Palette, Dices, Crown, Sparkles, Coi
 import { useGame } from '../../context/GameContext';
 import { ALL_GAMES } from '../../data/games';
 import { GameCategory, GameId } from '../../types';
+import { GlobalContinuousDrawsTicker } from '../common/GlobalContinuousDrawsTicker';
 
 export const AllGamesView: React.FC = () => {
   const { selectGame, playSound } = useGame();
@@ -86,6 +87,9 @@ export const AllGamesView: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* Global 24/7 Continuous Draws Across All 10 Games */}
+      <GlobalContinuousDrawsTicker />
 
       {/* Filter and Sort Toolbar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-2 border-b border-slate-200">
