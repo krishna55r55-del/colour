@@ -4,11 +4,8 @@ import {
   Trash2,
   ArrowUpRight,
   ArrowDownRight,
-  ChevronRight,
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
-import { BetDetailModal } from '../common/BetDetailModal';
-import { GameHistoryItem } from '../../types';
 
 export const HistoryView: React.FC = () => {
   const {
@@ -18,13 +15,11 @@ export const HistoryView: React.FC = () => {
     playSound,
   } = useGame();
 
-  // Selected bet item for detailed popup
-  const [selectedBetForDetail, setSelectedBetForDetail] = useState<GameHistoryItem | null>(null);
-
-  // Filter for Personal History
+  // Filter for Personal History (settled bets only — no open/pending bets)
   const [personalFilter, setPersonalFilter] = useState<'all' | 'wins' | 'losses'>('all');
 
-  const filteredPersonalHistory = history.filter((item) => {
+  const settledHistory = history.filter((item) => item.status !== 'Pending');
+  const filteredPersonalHistory = settledHistory.filter((item) => {
     if (personalFilter === 'wins') return item.isWin;
     if (personalFilter === 'losses') return !item.isWin;
     return true;
@@ -53,7 +48,7 @@ export const HistoryView: React.FC = () => {
             My Game History Log
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Review your personal round outcomes, multipliers, stakes, and virtual returns.
+            Review your personal WIN / LOSS status and amounts.
           </p>
         </div>
       </div>
@@ -135,7 +130,7 @@ export const HistoryView: React.FC = () => {
                     : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                All ({history.length})
+                All ({settledHistory.length})
               </button>
               <button
                 type="button"
@@ -149,7 +144,7 @@ export const HistoryView: React.FC = () => {
                     : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                Wins ({history.filter((i) => i.isWin).length})
+                Wins ({settledHistory.filter((i) => i.isWin).length})
               </button>
               <button
                 type="button"
@@ -163,11 +158,11 @@ export const HistoryView: React.FC = () => {
                     : 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
                 }`}
               >
-                Losses ({history.filter((i) => !i.isWin).length})
+                Losses ({settledHistory.filter((i) => !i.isWin).length})
               </button>
             </div>
 
-            {history.length > 0 && (
+            {settledHistory.length > 0 && (
               <button
                 type="button"
                 onClick={handleClear}
@@ -179,96 +174,39 @@ export const HistoryView: React.FC = () => {
             )}
           </div>
 
-          {/* Simplified History Log List: Main history shows only one compact status per bet */}
+          {/* Simplified History Log List: Only WIN/LOSS and Amount, no result numbers or click-to-open details */}
           {filteredPersonalHistory.length > 0 ? (
             <div className="space-y-2">
-              {filteredPersonalHistory.map((item) => {
-                const isPending = item.status === 'Pending';
-                const betOnLabel =
-                  item.selectedOption ||
-                  (item.target !== undefined
-                    ? !isNaN(Number(item.target))
-                      ? `Number ${item.target}`
-                      : item.target.toLowerCase() === 'purple'
-                      ? 'VIOLET'
-                      : item.target.toUpperCase()
-                    : item.choice.replace(/\s*\[Issue\s+.*?\]/, '').trim());
-
-                let resNum = item.resultNumber;
-                if (resNum === undefined && item.outcome) {
-                  const match = item.outcome.match(/Number\s+(\d+)/);
-                  if (match) resNum = parseInt(match[1], 10);
-                }
-
-                return (
-                  <div
-                    key={item.id}
-                    onClick={() => {
-                      playSound('click');
-                      setSelectedBetForDetail(item);
-                    }}
-                    className={`p-3 sm:p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-2 cursor-pointer hover:shadow-xs active:scale-[0.99] select-none ${
-                      isPending
-                        ? 'bg-amber-50/90 border-amber-300 hover:border-amber-400'
-                        : item.isWin
-                        ? 'bg-emerald-50/90 border-emerald-300 hover:border-emerald-400'
-                        : 'bg-red-50/90 border-red-300 hover:border-red-400'
+              {filteredPersonalHistory.map((item) => (
+                <div
+                  key={item.id}
+                  className={`p-3 sm:p-3.5 rounded-2xl border flex items-center justify-between gap-2 select-none ${
+                    item.isWin
+                      ? 'bg-emerald-50/90 border-emerald-300'
+                      : 'bg-red-50/90 border-red-300'
+                  }`}
+                >
+                  <span
+                    className={`px-3.5 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-xs ${
+                      item.isWin
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-red-600 text-white'
                     }`}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-xs shrink-0 ${
-                          isPending
-                            ? 'bg-amber-500 text-white'
-                            : item.isWin
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-red-600 text-white'
-                        }`}
-                      >
-                        {isPending ? 'PENDING' : item.isWin ? 'WIN' : 'LOSS'}
-                      </span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-xs font-black text-slate-900 font-display truncate">
-                            Bet: {betOnLabel}
-                          </span>
-                          {!isPending && resNum !== undefined && (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-white/80 px-1.5 py-0.5 rounded-md border border-slate-200">
-                              <span>Result:</span>
-                              <strong className="font-mono text-slate-900">{resNum}</strong>
-                            </span>
-                          )}
-                        </div>
-                        <span className="font-mono text-[11px] font-semibold text-slate-500 block">
-                          #{item.period ? item.period.slice(-4) : item.id.slice(-4)}
-                        </span>
-                      </div>
-                    </div>
+                    {item.isWin ? 'WIN' : 'LOSS'}
+                  </span>
 
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span
-                        className={`font-mono font-black text-sm tabular-nums ${
-                          isPending
-                            ? 'text-amber-700'
-                            : item.isWin
-                            ? 'text-emerald-700'
-                            : 'text-red-600'
-                        }`}
-                      >
-                        {isPending
-                          ? `₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`
-                          : item.isWin
-                          ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
-                          : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
-                      </span>
-                      <div className="flex items-center gap-1 text-xs font-bold text-slate-500">
-                        <span className="hidden sm:inline">View Details</span>
-                        <ChevronRight className="w-4 h-4 text-slate-400" />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                  <span
+                    className={`font-mono font-black text-sm tabular-nums ${
+                      item.isWin ? 'text-emerald-700' : 'text-red-600'
+                    }`}
+                  >
+                    {item.isWin
+                      ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
+                      : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
+                  </span>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="py-16 text-center rounded-3xl bg-white border border-slate-200 shadow-xs">
@@ -280,12 +218,6 @@ export const HistoryView: React.FC = () => {
             </div>
           )}
         </div>
-
-      {/* Bet Detail Popup on clicking WIN / LOSS */}
-      <BetDetailModal
-        item={selectedBetForDetail}
-        onClose={() => setSelectedBetForDetail(null)}
-      />
     </div>
   );
 };

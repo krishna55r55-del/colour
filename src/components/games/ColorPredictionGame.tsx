@@ -5,7 +5,6 @@ import {
   RotateCw,
   Sparkles,
   Check,
-  ChevronRight,
   TrendingUp,
   History,
   User,
@@ -25,7 +24,6 @@ import { useGame } from '../../context/GameContext';
 import { WinPosterModal, WinPosterData } from '../common/WinPosterModal';
 import { LossPosterModal, LossPosterData } from '../common/LossPosterModal';
 import { BetPlacedToast } from '../common/BetPlacedToast';
-import { BetDetailModal } from '../common/BetDetailModal';
 import {
   determineWinGoOutcome,
   getDeterministicNumberForRound,
@@ -106,7 +104,7 @@ export const ColorPredictionGame: React.FC = () => {
     toggleSound,
   } = useGame();
 
-  const [betOutcomeFilter, setBetOutcomeFilter] = useState<'all' | 'pending' | 'wins' | 'losses'>('all');
+  const [betOutcomeFilter, setBetOutcomeFilter] = useState<'all' | 'wins' | 'losses'>('all');
   const [betScopeFilter, setBetScopeFilter] = useState<'wingo' | 'all'>('wingo');
 
   const winManagerEnabledRef = useRef(winManagerEnabled);
@@ -132,7 +130,6 @@ export const ColorPredictionGame: React.FC = () => {
     resultNumber: 0,
     lostBetAmount: 0,
   });
-  const [selectedBetForDetail, setSelectedBetForDetail] = useState<GameHistoryItem | null>(null);
   const [roundReaction, setRoundReaction] = useState<{
     type: 'win' | 'loss';
     amount: number;
@@ -1225,7 +1222,7 @@ export const ColorPredictionGame: React.FC = () => {
                         : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                     }`}
                   >
-                    Win Go Bets ({allBettingRecords.filter((b) => b.gameId === 'color-prediction').length})
+                    Win Go Bets ({allBettingRecords.filter((b) => b.gameId === 'color-prediction' && b.status !== 'Pending').length})
                   </button>
                   <button
                     type="button"
@@ -1239,11 +1236,11 @@ export const ColorPredictionGame: React.FC = () => {
                         : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                     }`}
                   >
-                    All Games ({allBettingRecords.length})
+                    All Games ({allBettingRecords.filter((b) => b.status !== 'Pending').length})
                   </button>
                 </div>
 
-                {/* Outcome filters (All, Pending, Wins in Green, Losses in Red) */}
+                {/* Outcome filters (All, Wins in Green, Losses in Red) */}
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[10px] font-extrabold uppercase text-slate-400">Result:</span>
                   <button
@@ -1259,21 +1256,6 @@ export const ColorPredictionGame: React.FC = () => {
                     }`}
                   >
                     All
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      playSound('click');
-                      setBetOutcomeFilter('pending');
-                    }}
-                    className={`px-2 py-0.5 rounded-md text-[11px] font-black cursor-pointer transition-all flex items-center gap-1 ${
-                      betOutcomeFilter === 'pending'
-                        ? 'bg-amber-500 text-white shadow-xs'
-                        : 'bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100'
-                    }`}
-                  >
-                    <Clock className="w-3 h-3 text-amber-600" />
-                    <span>Pending ({allBettingRecords.filter((b) => b.status === 'Pending').length})</span>
                   </button>
                   <button
                     type="button"
@@ -1308,112 +1290,56 @@ export const ColorPredictionGame: React.FC = () => {
                 </div>
               </div>
 
-              {/* Betting History List: Pending in Amber, Wins in Green, Losses in Red */}
+              {/* Betting History List: Only settled WIN/LOSS and amount, no result numbers or open bets */}
               {allBettingRecords
                 .filter((b) => {
+                  if (b.status === 'Pending') return false;
                   if (betScopeFilter === 'wingo' && b.gameId !== 'color-prediction') return false;
-                  if (betOutcomeFilter === 'pending' && b.status !== 'Pending') return false;
-                  if (betOutcomeFilter === 'wins' && (b.status === 'Pending' || !b.isWin)) return false;
-                  if (betOutcomeFilter === 'losses' && (b.status === 'Pending' || b.isWin)) return false;
+                  if (betOutcomeFilter === 'wins' && !b.isWin) return false;
+                  if (betOutcomeFilter === 'losses' && b.isWin) return false;
                   return true;
                 })
                 .length > 0 ? (
                 <div className="space-y-2">
                   {allBettingRecords
                     .filter((b) => {
+                      if (b.status === 'Pending') return false;
                       if (betScopeFilter === 'wingo' && b.gameId !== 'color-prediction') return false;
-                      if (betOutcomeFilter === 'pending' && b.status !== 'Pending') return false;
-                      if (betOutcomeFilter === 'wins' && (b.status === 'Pending' || !b.isWin)) return false;
-                      if (betOutcomeFilter === 'losses' && (b.status === 'Pending' || b.isWin)) return false;
+                      if (betOutcomeFilter === 'wins' && !b.isWin) return false;
+                      if (betOutcomeFilter === 'losses' && b.isWin) return false;
                       return true;
                     })
                     .map((item, idx) => {
-                      const isPending = item.status === 'Pending';
-                      const isWin = !isPending && item.isWin;
-
-                      const betOnLabel =
-                        item.selectedOption ||
-                        (item.target !== undefined
-                          ? !isNaN(Number(item.target))
-                            ? `Number ${item.target}`
-                            : item.target.toLowerCase() === 'purple'
-                            ? 'VIOLET'
-                            : item.target.toUpperCase()
-                          : item.choice.replace(/\s*\[Issue\s+.*?\]/, '').trim());
-
-                      let resNum = item.resultNumber;
-                      if (resNum === undefined && item.outcome) {
-                        const match = item.outcome.match(/Number\s+(\d+)/);
-                        if (match) resNum = parseInt(match[1], 10);
-                      }
+                      const isWin = item.isWin;
 
                       return (
                         <div
                           key={item.id || idx}
-                          onClick={() => {
-                            playSound('click');
-                            setSelectedBetForDetail(item);
-                          }}
-                          className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-2 cursor-pointer hover:shadow-xs active:scale-[0.99] select-none ${
-                            isPending
-                              ? 'bg-amber-50/90 border-amber-300 hover:border-amber-400'
-                              : isWin
-                              ? 'bg-emerald-50/90 border-emerald-300 hover:border-emerald-400'
-                              : 'bg-red-50/90 border-red-300 hover:border-red-400'
+                          className={`p-3 rounded-2xl border flex items-center justify-between gap-2 select-none ${
+                            isWin
+                              ? 'bg-emerald-50/90 border-emerald-300'
+                              : 'bg-red-50/90 border-red-300'
                           }`}
                         >
-                          {/* Status Badge + Bet Option/Number + Period & Drawn Number */}
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <span
-                              className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider shadow-xs shrink-0 ${
-                                isPending
-                                  ? 'bg-amber-500 text-white'
-                                  : isWin
-                                  ? 'bg-emerald-600 text-white'
-                                  : 'bg-red-600 text-white'
-                              }`}
-                            >
-                              {isPending ? 'PENDING' : isWin ? 'WIN' : 'LOSS'}
-                            </span>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="text-xs font-black text-slate-900 font-display truncate">
-                                  Bet: {betOnLabel}
-                                </span>
-                                {!isPending && resNum !== undefined && (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-white/80 px-1.5 py-0.5 rounded-md border border-slate-200">
-                                    <span>Result:</span>
-                                    <strong className="font-mono text-slate-900">{resNum}</strong>
-                                  </span>
-                                )}
-                              </div>
-                              <span className="text-[10px] font-mono text-slate-500 font-semibold block">
-                                #{item.period ? item.period.slice(-4) : item.id.slice(-4)}
-                              </span>
-                            </div>
-                          </div>
+                          <span
+                            className={`px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider shadow-xs ${
+                              isWin
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-red-600 text-white'
+                            }`}
+                          >
+                            {isWin ? 'WIN' : 'LOSS'}
+                          </span>
 
-                          <div className="flex items-center gap-2.5 shrink-0">
-                            <span
-                              className={`font-mono font-black text-sm tabular-nums ${
-                                isPending
-                                  ? 'text-amber-700'
-                                  : isWin
-                                  ? 'text-emerald-700'
-                                  : 'text-red-600'
-                              }`}
-                            >
-                              {isPending
-                                ? `₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`
-                                : isWin
-                                ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
-                                : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
-                            </span>
-                            <div className="flex items-center gap-0.5 text-[11px] font-bold text-slate-500">
-                              <span className="hidden sm:inline">Details</span>
-                              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                            </div>
-                          </div>
+                          <span
+                            className={`font-mono font-black text-sm tabular-nums ${
+                              isWin ? 'text-emerald-700' : 'text-red-600'
+                            }`}
+                          >
+                            {isWin
+                              ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
+                              : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
+                          </span>
                         </div>
                       );
                     })}
@@ -1728,7 +1654,7 @@ export const ColorPredictionGame: React.FC = () => {
         show={showBetPlacedToast}
         onClose={() => setShowBetPlacedToast(false)}
         message="BET PLACED SUCCESSFULLY"
-        durationMs={2800}
+        durationMs={2000}
       />
 
       {/* Requirement 4: Win Congratulations Poster (Green Theme) */}
@@ -1741,12 +1667,6 @@ export const ColorPredictionGame: React.FC = () => {
       <LossPosterModal
         data={lossPosterData}
         onClose={() => setLossPosterData((prev) => ({ ...prev, isOpen: false }))}
-      />
-
-      {/* Requirement 3: Detailed Bet History Popup */}
-      <BetDetailModal
-        item={selectedBetForDetail}
-        onClose={() => setSelectedBetForDetail(null)}
       />
     </div>
   );
