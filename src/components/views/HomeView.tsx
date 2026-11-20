@@ -573,7 +573,7 @@ export const HomeView: React.FC = () => {
               aria-label={winManagerEnabled ? 'Volume ON' : 'Volume OFF'}
             >
               <span
-                className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out flex items-center justify-center text-[9px] font-black uppercase ${
+                className={`pointer-events-none h-6 w-6 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out inline-flex items-center justify-center text-[9px] font-black uppercase ${
                   winManagerEnabled ? 'translate-x-7 text-emerald-600' : 'translate-x-0 text-slate-500'
                 }`}
               >

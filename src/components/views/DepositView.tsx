@@ -118,7 +118,7 @@ export const DepositView: React.FC = () => {
     if (!file) return;
 
     if (file.size > 8 * 1024 * 1024) {
-      alert('File size exceeds 8MB limit. Please select a smaller screenshot.');
+      setFormError('File size exceeds 8MB limit. Please select a smaller screenshot.');
       return;
     }
 

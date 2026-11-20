@@ -256,23 +256,40 @@ export async function fetchBetHistoryFromSupabase(
 
     if (error || !data) return null;
 
-    return data.map((row: any) => ({
-      id: row.id,
-      gameId: row.game_id,
-      gameTitle: row.game_title,
-      betAmount: Number(row.bet_amount),
-      choice: row.choice,
-      outcome: row.outcome,
-      payout: Number(row.payout),
-      netProfit: Number(row.net_profit),
-      isWin: Boolean(row.is_win),
-      timestamp: new Date(row.created_at).getTime(),
-      status: (row.status as 'Pending' | 'Completed') || (row.outcome === 'Pending Resolution' ? 'Pending' : 'Completed'),
-      period: row.period || undefined,
-      target: row.target || undefined,
-      multiplier: row.multiplier ? Number(row.multiplier) : undefined,
-      settledAt: row.settled_at ? new Date(row.settled_at).getTime() : undefined,
-    }));
+    return data.map((row: any) => {
+      const outcomeStr = String(row.outcome || '');
+      const numMatch = outcomeStr.match(/Number\s+(\d+)/i);
+      const parsedNum = numMatch ? parseInt(numMatch[1], 10) : undefined;
+      const rawTarget = row.target ? String(row.target) : '';
+      const cleanChoice = String(row.choice || '').replace(/\s*\[Issue\s+.*?\]/g, '').trim();
+      const selectedOption = rawTarget
+        ? !isNaN(Number(rawTarget))
+          ? `Number ${rawTarget}`
+          : rawTarget.toLowerCase() === 'purple' || rawTarget.toLowerCase() === 'violet'
+          ? 'VIOLET'
+          : rawTarget.toUpperCase()
+        : cleanChoice || undefined;
+
+      return {
+        id: row.id,
+        gameId: row.game_id,
+        gameTitle: row.game_title,
+        betAmount: Number(row.bet_amount),
+        choice: row.choice,
+        outcome: row.outcome,
+        payout: Number(row.payout),
+        netProfit: Number(row.net_profit),
+        isWin: Boolean(row.is_win),
+        timestamp: new Date(row.created_at).getTime(),
+        status: (row.status as 'Pending' | 'Completed') || (row.outcome === 'Pending Resolution' ? 'Pending' : 'Completed'),
+        period: row.period || undefined,
+        target: row.target || undefined,
+        selectedOption,
+        resultNumber: parsedNum,
+        multiplier: row.multiplier ? Number(row.multiplier) : undefined,
+        settledAt: row.settled_at ? new Date(row.settled_at).getTime() : undefined,
+      };
+    });
   } catch {
     return null;
   }

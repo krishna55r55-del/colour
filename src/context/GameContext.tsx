@@ -90,7 +90,9 @@ interface GameContextType {
   refundBet: (amount: number) => void;
   submitWinGoBet: (order: WinGoBetOrderInput) => { success: boolean; betId?: string; error?: string };
   pendingWinGoBets: GameHistoryItem[];
-  settleWinGoBets: () => Promise<void>;
+  settleWinGoBets: (forcedOutcomes?: Record<string, number>) => Promise<void>;
+  settledRoundOutcomes: Record<string, number>;
+  recordSettledRoundOutcome: (duration: number, period: string, drawnNumber: number) => void;
   recordGameResult: (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => void;
   deposit: (amount: number, bonus?: number, method?: string) => DepositRecord;
   submitDepositRequest: (data: {
@@ -152,6 +154,7 @@ const STORAGE_KEY_MASTER_PLAYER_BETS = 'cobclub_master_player_records_v1';
 const STORAGE_KEY_MASTER_DEPOSITS = 'cobclub_master_deposits_v1';
 const STORAGE_KEY_REFERRALS = 'cobclub_referrals_v1';
 const STORAGE_KEY_REFERRAL_BONUSES = 'cobclub_referral_bonuses_v1';
+const STORAGE_KEY_ROUND_OUTCOMES = 'cobclub_wingo_round_outcomes_v1';
 
 export const REFERRAL_REWARD_AMOUNT = 77;
 export const REFERRAL_MILESTONE_TARGET = 5;
@@ -390,6 +393,38 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const historyRef = useRef(history);
   historyRef.current = history;
+
+  const winManagerEnabledRef = useRef(winManagerEnabled);
+  winManagerEnabledRef.current = winManagerEnabled;
+
+  const soundEnabledRef = useRef(soundEnabled);
+  soundEnabledRef.current = soundEnabled;
+
+  const [settledRoundOutcomes, setSettledRoundOutcomes] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_ROUND_OUTCOMES);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const settledRoundOutcomesRef = useRef<Record<string, number>>(settledRoundOutcomes);
+  settledRoundOutcomesRef.current = settledRoundOutcomes;
+
+  const recordSettledRoundOutcome = (duration: number, period: string, drawnNumber: number) => {
+    const key = `${duration}_${period}`;
+    if (settledRoundOutcomesRef.current[key] === drawnNumber) return;
+    const next = { ...settledRoundOutcomesRef.current, [key]: drawnNumber };
+    const keys = Object.keys(next);
+    if (keys.length > 200) {
+      keys.slice(0, keys.length - 200).forEach((k) => delete next[k]);
+    }
+    settledRoundOutcomesRef.current = next;
+    setSettledRoundOutcomes(next);
+    try {
+      localStorage.setItem(STORAGE_KEY_ROUND_OUTCOMES, JSON.stringify(next));
+    } catch {}
+  };
 
   const pendingWinGoBets = React.useMemo(() => {
     return history.filter((h) => h.gameId === 'color-prediction' && h.status === 'Pending');
@@ -691,13 +726,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss' | 'countdown_beep' | 'round_end',
     arg?: number
   ) => {
-    if (soundEnabled) {
+    if (soundEnabledRef.current) {
       soundManager.play(type, arg);
     }
   };
 
   const toggleSound = () => {
-    const next = !soundEnabled;
+    const next = !soundEnabledRef.current;
+    soundEnabledRef.current = next;
     setSoundEnabled(next);
     if (next) {
       soundManager.play('click');
@@ -958,6 +994,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     const nextBalance = balance - amount;
     setBalance(nextBalance);
+    balanceRef.current = nextBalance;
     playSound('bet');
 
     // Sync updated balance to Supabase and user storage
@@ -970,6 +1007,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refundBet = (amount: number) => {
     const nextBalance = balance + amount;
     setBalance(nextBalance);
+    balanceRef.current = nextBalance;
     if (user) {
       updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
     }
@@ -1061,7 +1099,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isSettlingRef = useRef(false);
 
   // Global continuous settlement algorithm: evaluates any pending WinGo bets whose periods have completed
-  const settleWinGoBets = async () => {
+  const settleWinGoBets = async (forcedOutcomes?: Record<string, number>) => {
     if (isSettlingRef.current) return;
     isSettlingRef.current = true;
 
@@ -1076,6 +1114,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
+      const activeWinManager = winManagerEnabledRef.current;
       let balanceIncrement = 0;
       let didUpdateAny = false;
       const settledBetIds = new Set<string>();
@@ -1087,9 +1126,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const dur = item.duration || 30;
         const { roundEndTime } = parsePeriodToTimestamp(item.period, dur);
+        const outcomeKey = `${dur}_${item.period}`;
+        const hasForced = forcedOutcomes && typeof forcedOutcomes[outcomeKey] === 'number';
 
-        // Check if round has elapsed
-        if (now < roundEndTime) {
+        // Check if round has elapsed (unless explicitly forced by resolveRound right at boundary)
+        if (!hasForced && now < roundEndTime) {
           return item;
         }
 
@@ -1099,13 +1140,20 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
         const { roundIdx } = parsePeriodToTimestamp(item.period, dur);
         const defaultNum = getDeterministicNumberForRound(roundIdx, dur);
-        const drawnNum = periodBets.length > 0
+        const recordedNum = settledRoundOutcomesRef.current[outcomeKey];
+        const drawnNum = hasForced
+          ? forcedOutcomes[outcomeKey]
+          : typeof recordedNum === 'number'
+          ? recordedNum
+          : periodBets.length > 0
           ? determineWinGoOutcome(
               periodBets.map((b) => ({ target: b.target as any, amount: b.betAmount })),
-              winManagerEnabled,
+              activeWinManager,
               defaultNum
             )
           : defaultNum;
+
+        recordSettledRoundOutcome(dur, item.period, drawnNum);
 
         const bigSmall: 'Big' | 'Small' = drawnNum >= 5 ? 'Big' : 'Small';
         let color: 'green' | 'red' | 'purple_red' | 'purple_green';
@@ -1119,7 +1167,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           targetVal = Number(targetVal);
         }
 
-        const evalRes = evaluateWinGoBet(targetVal, item.betAmount, drawnNum, undefined, winManagerEnabled);
+        const evalRes = evaluateWinGoBet(targetVal, item.betAmount, drawnNum, undefined, activeWinManager);
 
         didUpdateAny = true;
         settledBetIds.add(item.id);
@@ -1195,6 +1243,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Update stats
         setStats((prevStats) => {
+          let addedRounds = 0;
+          let addedWagered = 0;
           let addedWins = 0;
           let addedLosses = 0;
           let addedWon = 0;
@@ -1202,6 +1252,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           updatedHistory.forEach((h) => {
             if (settledBetIds.has(h.id)) {
+              addedRounds++;
+              addedWagered += h.betAmount;
               if (h.isWin) {
                 addedWins++;
                 addedWon += h.payout;
@@ -1214,6 +1266,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           const nextStats = {
             ...prevStats,
+            totalRounds: prevStats.totalRounds + addedRounds,
+            totalWagered: prevStats.totalWagered + addedWagered,
             totalWins: prevStats.totalWins + addedWins,
             totalLosses: prevStats.totalLosses + addedLosses,
             totalWon: prevStats.totalWon + addedWon,
@@ -1305,6 +1359,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (fullItem.payout > 0) {
       nextBalance = balance + fullItem.payout;
       setBalance(nextBalance);
+      balanceRef.current = nextBalance;
     }
 
     if (fullItem.isWin) {
@@ -1438,6 +1493,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setDailyBonus(nextBonusState);
     setBalance(nextBalance);
+    balanceRef.current = nextBalance;
     playSound('jackpot');
 
     if (user?.phoneNumber) {
@@ -1453,6 +1509,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const resetBalance = () => {
     setBalance(INITIAL_BALANCE);
+    balanceRef.current = INITIAL_BALANCE;
     playSound('win');
     if (user) {
       updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, INITIAL_BALANCE);
@@ -1919,6 +1976,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         submitWinGoBet,
         pendingWinGoBets,
         settleWinGoBets,
+        settledRoundOutcomes,
+        recordSettledRoundOutcome,
         deposit,
         submitDepositRequest,
         approveDepositRequest,

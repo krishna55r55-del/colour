@@ -17,6 +17,7 @@ export const HistoryView: React.FC = () => {
 
   // Filter for Personal History (settled bets only — no open/pending bets)
   const [personalFilter, setPersonalFilter] = useState<'all' | 'wins' | 'losses'>('all');
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   const settledHistory = history.filter((item) => item.status !== 'Pending');
   const filteredPersonalHistory = settledHistory.filter((item) => {
@@ -31,9 +32,12 @@ export const HistoryView: React.FC = () => {
 
   const handleClear = () => {
     playSound('click');
-    if (window.confirm('Clear all game history records for your current account?')) {
-      clearHistory();
+    if (!confirmingClear) {
+      setConfirmingClear(true);
+      return;
     }
+    clearHistory();
+    setConfirmingClear(false);
   };
 
   return (
@@ -163,50 +167,97 @@ export const HistoryView: React.FC = () => {
             </div>
 
             {settledHistory.length > 0 && (
-              <button
-                type="button"
-                onClick={handleClear}
-                className="px-3.5 py-1.5 rounded-xl bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-600 border border-slate-200 hover:border-rose-200 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Clear My History</span>
-              </button>
+              confirmingClear ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleClear}
+                    className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Confirm Clear</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setConfirmingClear(false);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="px-3.5 py-1.5 rounded-xl bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-600 border border-slate-200 hover:border-rose-200 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Clear My History</span>
+                </button>
+              )
             )}
           </div>
 
-          {/* Simplified History Log List: Only WIN/LOSS and Amount, no result numbers or click-to-open details */}
+          {/* History Log List: WIN/LOSS, Bet Placed On, and Amount (no result numbers or open bets) */}
           {filteredPersonalHistory.length > 0 ? (
             <div className="space-y-2">
-              {filteredPersonalHistory.map((item) => (
-                <div
-                  key={item.id}
-                  className={`p-3 sm:p-3.5 rounded-2xl border flex items-center justify-between gap-2 select-none ${
-                    item.isWin
-                      ? 'bg-emerald-50/90 border-emerald-300'
-                      : 'bg-red-50/90 border-red-300'
-                  }`}
-                >
-                  <span
-                    className={`px-3.5 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-xs ${
-                      item.isWin
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-red-600 text-white'
-                    }`}
-                  >
-                    {item.isWin ? 'WIN' : 'LOSS'}
-                  </span>
+              {filteredPersonalHistory.map((item) => {
+                const betTargetLabel =
+                  item.selectedOption ||
+                  (item.target
+                    ? !isNaN(Number(item.target))
+                      ? `Number ${item.target}`
+                      : item.target.toUpperCase()
+                    : item.choice.replace(/\s*\[Issue\s+.*?\]/g, '').trim());
 
-                  <span
-                    className={`font-mono font-black text-sm tabular-nums ${
-                      item.isWin ? 'text-emerald-700' : 'text-red-600'
+                return (
+                  <div
+                    key={item.id}
+                    className={`p-3 sm:p-3.5 rounded-2xl border flex items-center justify-between gap-2 select-none ${
+                      item.isWin
+                        ? 'bg-emerald-50/90 border-emerald-300'
+                        : 'bg-red-50/90 border-red-300'
                     }`}
                   >
-                    {item.isWin
-                      ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
-                      : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
-                  </span>
-                </div>
-              ))}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className={`px-3.5 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-xs shrink-0 ${
+                          item.isWin
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-red-600 text-white'
+                        }`}
+                      >
+                        {item.isWin ? 'WIN' : 'LOSS'}
+                      </span>
+
+                      {betTargetLabel && (
+                        <span
+                          className={`px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wide border truncate ${
+                            item.isWin
+                              ? 'bg-white text-emerald-800 border-emerald-200'
+                              : 'bg-white text-red-700 border-red-200'
+                          }`}
+                        >
+                          Bet: {betTargetLabel}
+                        </span>
+                      )}
+                    </div>
+
+                    <span
+                      className={`font-mono font-black text-sm tabular-nums shrink-0 ${
+                        item.isWin ? 'text-emerald-700' : 'text-red-600'
+                      }`}
+                    >
+                      {item.isWin
+                        ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
+                        : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="py-16 text-center rounded-3xl bg-white border border-slate-200 shadow-xs">

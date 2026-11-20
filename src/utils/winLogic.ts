@@ -160,7 +160,8 @@ export const determineWinGoOutcome = (
   if (winManagerEnabled) {
     const allWonCandidates = candidateStats.filter((c) => c.allWon);
     if (allWonCandidates.length > 0) {
-      return allWonCandidates[Math.floor(Math.random() * allWonCandidates.length)].num;
+      const idx = (typeof defaultNumber === 'number' ? defaultNumber : 0) % allWonCandidates.length;
+      return allWonCandidates[idx].num;
     }
 
     const winningCandidates = candidateStats.filter((c) => c.winningBetsCount > 0);
@@ -175,7 +176,8 @@ export const determineWinGoOutcome = (
   if (hasAlwaysWin) {
     const mustWonCandidates = candidateStats.filter((c) => c.allMustWon);
     if (mustWonCandidates.length > 0) {
-      return mustWonCandidates[Math.floor(Math.random() * mustWonCandidates.length)].num;
+      const idx = (typeof defaultNumber === 'number' ? defaultNumber : 0) % mustWonCandidates.length;
+      return mustWonCandidates[idx].num;
     }
     const partialMustWon = candidateStats.filter((c) => c.mustWinBetsWon > 0);
     if (partialMustWon.length > 0) {
@@ -187,13 +189,20 @@ export const determineWinGoOutcome = (
   // 3. WIN MANAGER IS OFF and no always-win bet: ALWAYS LOSS!
   const zeroPayoutCandidates = candidateStats.filter((c) => c.allLost);
   if (zeroPayoutCandidates.length > 0) {
-    return zeroPayoutCandidates[Math.floor(Math.random() * zeroPayoutCandidates.length)].num;
+    const idx = (typeof defaultNumber === 'number' ? defaultNumber : 0) % zeroPayoutCandidates.length;
+    return zeroPayoutCandidates[idx].num;
   }
 
-  // If player placed bets covering all options, pick outcome with lowest wager
+  // If player placed bets covering all options, pick outcome with lowest wager (minimum bet wins)
   const nonZeroCandidates = [...candidateStats].filter((c) => c.totalPayout > 0);
   nonZeroCandidates.sort((a, b) => a.totalWinningWager - b.totalWinningWager || a.totalPayout - b.totalPayout);
-  return nonZeroCandidates[0].num;
+  const minWager = nonZeroCandidates[0].totalWinningWager;
+  const minPayout = nonZeroCandidates[0].totalPayout;
+  const tiedMin = nonZeroCandidates.filter(
+    (c) => c.totalWinningWager === minWager && c.totalPayout === minPayout
+  );
+  const tieIdx = (typeof defaultNumber === 'number' ? defaultNumber : 0) % tiedMin.length;
+  return tiedMin[tieIdx].num;
 };
 
 // Period prefix helper

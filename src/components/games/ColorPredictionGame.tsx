@@ -55,9 +55,14 @@ interface PeriodHistory {
 }
 
 
-// Continuous deterministic history generator: produces identical continuous records
-// across all users and devices whether the site is open, closed, or refreshed
-const createContinuousHistory = (duration: WinGoDuration, count: number = 30): PeriodHistory[] => {
+// Continuous deterministic history generator: preserves actual settled round outcomes
+// when bets were placed so Game Record, Chart Trends, and Bet Settlement always match
+const createContinuousHistory = (
+  duration: WinGoDuration,
+  count: number = 30,
+  settledOutcomes?: Record<string, number>,
+  userHistory?: GameHistoryItem[]
+): PeriodHistory[] => {
   const now = Date.now();
   const currentRoundIndex = Math.floor(now / (duration * 1000));
   const list: PeriodHistory[] = [];
@@ -66,7 +71,35 @@ const createContinuousHistory = (duration: WinGoDuration, count: number = 30): P
     const roundIdx = currentRoundIndex - i;
     const roundTime = roundIdx * duration * 1000;
     const period = getPeriodForTime(roundTime, duration);
-    const num = getDeterministicNumberForRound(roundIdx, duration);
+    const outcomeKey = `${duration}_${period}`;
+
+    let num: number | undefined =
+      settledOutcomes && typeof settledOutcomes[outcomeKey] === 'number'
+        ? settledOutcomes[outcomeKey]
+        : undefined;
+
+    if (typeof num !== 'number' && userHistory && userHistory.length > 0) {
+      const matched = userHistory.find(
+        (b) =>
+          b.gameId === 'color-prediction' &&
+          b.status === 'Completed' &&
+          b.period === period &&
+          (b.duration === duration || (!b.duration && duration === 30))
+      );
+      if (matched) {
+        if (typeof matched.resultNumber === 'number') {
+          num = matched.resultNumber;
+        } else if (matched.outcome) {
+          const m = matched.outcome.match(/Number\s+(\d+)/i);
+          if (m) num = parseInt(m[1], 10);
+        }
+      }
+    }
+
+    if (typeof num !== 'number') {
+      num = getDeterministicNumberForRound(roundIdx, duration);
+    }
+
     const bigSmall: 'Big' | 'Small' = num >= 5 ? 'Big' : 'Small';
 
     let color: 'green' | 'red' | 'purple_red' | 'purple_green';
@@ -100,6 +133,8 @@ export const ColorPredictionGame: React.FC = () => {
     submitWinGoBet,
     pendingWinGoBets,
     settleWinGoBets,
+    settledRoundOutcomes,
+    recordSettledRoundOutcome,
     soundEnabled,
     toggleSound,
   } = useGame();
@@ -109,6 +144,17 @@ export const ColorPredictionGame: React.FC = () => {
 
   const winManagerEnabledRef = useRef(winManagerEnabled);
   winManagerEnabledRef.current = winManagerEnabled;
+
+  const playSoundRef = useRef(playSound);
+  playSoundRef.current = playSound;
+
+  const historyRef = useRef(history);
+  historyRef.current = history;
+
+  const settledRoundOutcomesRef = useRef(settledRoundOutcomes);
+  settledRoundOutcomesRef.current = settledRoundOutcomes;
+
+  const shownPosterPeriodsRef = useRef<Set<string>>(new Set());
 
   // Sound synchronization ref to guarantee exactly one sound per second in final 5 seconds
   const lastSoundSecRef = useRef<number | null>(null);
@@ -142,10 +188,10 @@ export const ColorPredictionGame: React.FC = () => {
 
   // Distinct continuous history records for each of the 4 sections
   const [historiesByDuration, setHistoriesByDuration] = useState<Record<WinGoDuration, PeriodHistory[]>>(() => ({
-    30: createContinuousHistory(30),
-    60: createContinuousHistory(60),
-    180: createContinuousHistory(180),
-    300: createContinuousHistory(300),
+    30: createContinuousHistory(30, 30, settledRoundOutcomes, history),
+    60: createContinuousHistory(60, 30, settledRoundOutcomes, history),
+    180: createContinuousHistory(180, 30, settledRoundOutcomes, history),
+    300: createContinuousHistory(300, 30, settledRoundOutcomes, history),
   }));
 
   // Current period issue codes per duration
@@ -209,6 +255,7 @@ export const ColorPredictionGame: React.FC = () => {
     quantity: 1,
     customWagerInput: '10',
   });
+  const [betModalError, setBetModalError] = useState<string | null>(null);
 
   // How to play modal
   const [showHowToPlay, setShowHowToPlay] = useState(false);
@@ -269,23 +316,37 @@ export const ColorPredictionGame: React.FC = () => {
   // Resolve Round logic for a specific section duration (30s, 1Min, 3Min, 5Min)
   const resolveRound = (dur: WinGoDuration) => {
     const periodToResolve = currentPeriodsRef.current[dur];
+    const outcomeKey = `${dur}_${periodToResolve}`;
     const { roundIdx } = parsePeriodToTimestamp(periodToResolve, dur);
     const defaultDrawnNumber = getDeterministicNumberForRound(roundIdx, dur);
 
-    // Look for active player bets placed for this period and duration
-    const betsInThisPeriod = pendingWinGoBets.filter(
-      (b) => b.period === periodToResolve && (b.duration === dur || (!b.duration && dur === 30))
+    // Look for all player bets (pending OR already settled by background loop) for this period & duration
+    const betsInThisPeriod = historyRef.current.filter(
+      (b) =>
+        b.gameId === 'color-prediction' &&
+        b.period === periodToResolve &&
+        (b.duration === dur || (!b.duration && dur === 30))
     );
 
-    // If player placed bets, outcome hits player bets with target win amounts:
-    // [120, 230, 340, 450, 560, 670, 780, 890, 1020]
-    const drawnNumber = betsInThisPeriod.length > 0
-      ? determineWinGoOutcome(
-          betsInThisPeriod.map((b) => ({ target: b.target as any, amount: b.betAmount })),
-          winManagerEnabledRef.current,
-          defaultDrawnNumber
-        )
-      : defaultDrawnNumber;
+    const recordedOutcome = settledRoundOutcomesRef.current[outcomeKey];
+    const alreadySettledNum = betsInThisPeriod.find(
+      (b) => b.status === 'Completed' && typeof b.resultNumber === 'number'
+    )?.resultNumber;
+
+    const drawnNumber =
+      typeof recordedOutcome === 'number'
+        ? recordedOutcome
+        : typeof alreadySettledNum === 'number'
+        ? alreadySettledNum
+        : betsInThisPeriod.length > 0
+        ? determineWinGoOutcome(
+            betsInThisPeriod.map((b) => ({ target: b.target as any, amount: b.betAmount })),
+            winManagerEnabledRef.current,
+            defaultDrawnNumber
+          )
+        : defaultDrawnNumber;
+
+    recordSettledRoundOutcome(dur, periodToResolve, drawnNumber);
 
     const bigSmall: 'Big' | 'Small' = drawnNumber >= 5 ? 'Big' : 'Small';
 
@@ -302,17 +363,27 @@ export const ColorPredictionGame: React.FC = () => {
       color: colorType,
     };
 
-    // Add drawn outcome distinctly to this specific section's history
-    setHistoriesByDuration((prev) => ({
-      ...prev,
-      [dur]: [periodRecord, ...(prev[dur] || []).slice(0, 29)],
-    }));
+    // Add drawn outcome distinctly to this specific section's history (deduplicated by period)
+    setHistoriesByDuration((prev) => {
+      const existing = prev[dur] || [];
+      const filtered = existing.filter((r) => r.period !== periodToResolve);
+      return {
+        ...prev,
+        [dur]: [periodRecord, ...filtered].slice(0, 30),
+      };
+    });
 
-    // Trigger instant settlement of pending bets
-    settleWinGoBets();
+    // Trigger instant settlement of pending bets using the exact drawnNumber
+    settleWinGoBets({ [outcomeKey]: drawnNumber });
 
-    // Check if user placed bets on this period to show Win/Loss poster if currently viewing this duration
-    if (betsInThisPeriod.length > 0 && selectedDurationRef.current === dur) {
+    // Show Win/Loss poster once per resolved period if user placed bets and is viewing this duration
+    if (
+      betsInThisPeriod.length > 0 &&
+      selectedDurationRef.current === dur &&
+      !shownPosterPeriodsRef.current.has(outcomeKey)
+    ) {
+      shownPosterPeriodsRef.current.add(outcomeKey);
+
       let totalBet = 0;
       let totalGrossPayout = 0;
       let totalCommission = 0;
@@ -364,7 +435,7 @@ export const ColorPredictionGame: React.FC = () => {
           emoji: '🥳',
           label: 'WIN! CONGRATULATIONS!',
         });
-        setTimeout(() => playSound('win'), 260);
+        setTimeout(() => playSoundRef.current('win'), 260);
         setTimeout(() => setRoundReaction(null), 5000);
       } else {
         setLossPosterData({
@@ -381,7 +452,7 @@ export const ColorPredictionGame: React.FC = () => {
           emoji: '💔',
           label: 'LOSS! NEXT ROUND!',
         });
-        setTimeout(() => playSound('loss'), 260);
+        setTimeout(() => playSoundRef.current('loss'), 260);
         setTimeout(() => setRoundReaction(null), 5000);
       }
     }
@@ -426,12 +497,12 @@ export const ColorPredictionGame: React.FC = () => {
       if (currentSec <= 5 && currentSec >= 1) {
         if (lastSoundSecRef.current !== currentSec) {
           lastSoundSecRef.current = currentSec;
-          playSound('countdown_beep', currentSec);
+          playSoundRef.current('countdown_beep', currentSec);
         }
       } else if (currentSec === activeDur || currentSec === 0) {
         if (lastSoundSecRef.current !== 0) {
           lastSoundSecRef.current = 0;
-          playSound('round_end');
+          playSoundRef.current('round_end');
         }
       } else {
         lastSoundSecRef.current = null;
@@ -445,16 +516,28 @@ export const ColorPredictionGame: React.FC = () => {
   }, []); // Run on mount only!
 
   // When window regains focus or visibility (or user switches back to tab),
-  // instantly synchronize the continuous history so no missed rounds exist
+  // synchronize history while preserving all settled bet outcomes
   useEffect(() => {
     const handleSync = () => {
       const allModes: WinGoDuration[] = [30, 60, 180, 300];
-      setHistoriesByDuration((prev) => {
-        const next = { ...prev };
-        allModes.forEach((dur) => {
-          next[dur] = createContinuousHistory(dur, 30);
-        });
-        return next;
+      setHistoriesByDuration(() => ({
+        30: createContinuousHistory(30, 30, settledRoundOutcomesRef.current, historyRef.current),
+        60: createContinuousHistory(60, 30, settledRoundOutcomesRef.current, historyRef.current),
+        180: createContinuousHistory(180, 30, settledRoundOutcomesRef.current, historyRef.current),
+        300: createContinuousHistory(300, 30, settledRoundOutcomesRef.current, historyRef.current),
+      }));
+
+      const now = Date.now();
+      const updatedPeriods: Record<WinGoDuration, string> = {
+        30: getPeriodForTime(now, 30),
+        60: getPeriodForTime(now, 60),
+        180: getPeriodForTime(now, 180),
+        300: getPeriodForTime(now, 300),
+      };
+      setCurrentPeriods(updatedPeriods);
+      currentPeriodsRef.current = updatedPeriods;
+      allModes.forEach((dur) => {
+        lastRoundIndicesRef.current[dur] = Math.floor(now / (dur * 1000));
       });
 
       const activeDur = selectedDurationRef.current;
@@ -468,6 +551,16 @@ export const ColorPredictionGame: React.FC = () => {
       window.removeEventListener('focus', handleSync);
     };
   }, []);
+
+  // Keep Game Record synced whenever background settlement records a new round outcome
+  useEffect(() => {
+    setHistoriesByDuration({
+      30: createContinuousHistory(30, 30, settledRoundOutcomes, history),
+      60: createContinuousHistory(60, 30, settledRoundOutcomes, history),
+      180: createContinuousHistory(180, 30, settledRoundOutcomes, history),
+      300: createContinuousHistory(300, 30, settledRoundOutcomes, history),
+    });
+  }, [settledRoundOutcomes]);
 
   // Auto-close bet drawer if timer enters the 5s locked window
   useEffect(() => {
@@ -523,6 +616,7 @@ export const ColorPredictionGame: React.FC = () => {
       themeColor = 'blue';
     }
 
+    setBetModalError(null);
     setBetModal({
       isOpen: true,
       target,
@@ -537,14 +631,16 @@ export const ColorPredictionGame: React.FC = () => {
 
   // Confirm bet in modal: permanently saved to GameContext & Supabase
   const handleConfirmBet = () => {
-    if (!betModal.target) return;
+    if (betModal.target === null || betModal.target === undefined) return;
+    setBetModalError(null);
     const typed = parseInt(betModal.customWagerInput, 10);
     const totalWager = !isNaN(typed) && typed > 0
       ? typed
       : betModal.baseUnit * betModal.quantity;
 
     if (totalWager <= 0 || balance < totalWager) {
-      alert('Insufficient available points. Please use Deposit to recharge free credits.');
+      setBetModalError('Insufficient available balance. Please Deposit to add funds.');
+      playSoundRef.current('loss');
       return;
     }
 
@@ -568,10 +664,12 @@ export const ColorPredictionGame: React.FC = () => {
 
     if (res.success) {
       setBetModal((prev) => ({ ...prev, isOpen: false }));
+      setBetModalError(null);
       // Trigger green BET PLACED SUCCESSFULLY notification
       setShowBetPlacedToast(true);
     } else if (res.error) {
-      alert(res.error);
+      setBetModalError(res.error);
+      playSoundRef.current('loss');
     }
   };
 
@@ -1311,6 +1409,13 @@ export const ColorPredictionGame: React.FC = () => {
                     })
                     .map((item, idx) => {
                       const isWin = item.isWin;
+                      const betTargetLabel =
+                        item.selectedOption ||
+                        (item.target
+                          ? !isNaN(Number(item.target))
+                            ? `Number ${item.target}`
+                            : item.target.toUpperCase()
+                          : item.choice.replace(/\s*\[Issue\s+.*?\]/g, '').trim());
 
                       return (
                         <div
@@ -1321,18 +1426,32 @@ export const ColorPredictionGame: React.FC = () => {
                               : 'bg-red-50/90 border-red-300'
                           }`}
                         >
-                          <span
-                            className={`px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider shadow-xs ${
-                              isWin
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-red-600 text-white'
-                            }`}
-                          >
-                            {isWin ? 'WIN' : 'LOSS'}
-                          </span>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span
+                              className={`px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider shadow-xs shrink-0 ${
+                                isWin
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-red-600 text-white'
+                              }`}
+                            >
+                              {isWin ? 'WIN' : 'LOSS'}
+                            </span>
+
+                            {betTargetLabel && (
+                              <span
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-black uppercase tracking-wide border truncate ${
+                                  isWin
+                                    ? 'bg-white text-emerald-800 border-emerald-200'
+                                    : 'bg-white text-red-700 border-red-200'
+                                }`}
+                              >
+                                Bet: {betTargetLabel}
+                              </span>
+                            )}
+                          </div>
 
                           <span
-                            className={`font-mono font-black text-sm tabular-nums ${
+                            className={`font-mono font-black text-sm tabular-nums shrink-0 ${
                               isWin ? 'text-emerald-700' : 'text-red-600'
                             }`}
                           >
@@ -1564,6 +1683,13 @@ export const ColorPredictionGame: React.FC = () => {
                 </div>
               </div>
 
+              {/* Calculation & Inline Error */}
+              {betModalError && (
+                <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold text-center">
+                  {betModalError}
+                </div>
+              )}
+
               {/* Confirmation CTA */}
               <div className="flex items-center gap-2 pt-2">
                 <button
@@ -1578,7 +1704,7 @@ export const ColorPredictionGame: React.FC = () => {
                   onClick={handleConfirmBet}
                   className="flex-2 py-3 rounded-xl bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white font-black text-sm shadow-md active:scale-98 transition-all cursor-pointer"
                 >
-                  Confirm Order (₹{(betModal.baseUnit * betModal.quantity).toLocaleString()})
+                  Confirm Order (₹{(parseInt(betModal.customWagerInput, 10) || betModal.baseUnit * betModal.quantity).toLocaleString()})
                 </button>
               </div>
             </div>

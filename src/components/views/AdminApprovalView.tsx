@@ -99,7 +99,7 @@ export const AdminApprovalView: React.FC = () => {
     if (res.success) {
       showToast(`Deposit ${req.id} approved! ₹${req.totalCredit.toLocaleString()} points added to player ${req.memberId || ''}.`);
     } else {
-      alert(res.error || 'Failed to approve deposit.');
+      showToast(res.error || 'Failed to approve deposit.');
     }
   };
 
