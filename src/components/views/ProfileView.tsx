@@ -8,6 +8,7 @@ import {
   LogOut,
   Building,
   ArrowRight,
+  Gift,
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 
@@ -22,6 +23,7 @@ export const ProfileView: React.FC = () => {
     logout,
     setActiveView,
     savedBankDetails,
+    referralStats,
   } = useGame();
 
   const getRank = (rounds: number) => {
@@ -163,6 +165,41 @@ export const ProfileView: React.FC = () => {
         >
           <span>{savedBankDetails ? 'Manage Bank Account' : 'Add Bank Details'}</span>
           <ArrowRight className="w-3.5 h-3.5 text-amber-600" />
+        </button>
+      </div>
+
+      {/* Refer & Earn Card */}
+      <div className="p-5 rounded-3xl bg-gradient-to-r from-emerald-50 via-white to-amber-50 border border-emerald-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-700 shrink-0">
+            <Gift className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">
+                Refer & Earn
+              </span>
+              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-600 text-white">
+                Code: {referralStats.referralCode}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-600 mt-0.5">
+              Earn ₹77 per deposited friend + ₹355 extra on 5 refers · Earned: ₹{referralStats.totalEarned.toLocaleString()}
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            playSound('click');
+            setActiveView('refer');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className="px-4 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+        >
+          <span>Invite & Earn</span>
+          <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
 

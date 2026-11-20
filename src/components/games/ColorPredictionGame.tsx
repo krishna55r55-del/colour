@@ -38,7 +38,7 @@ import {
 import { GameHistoryItem } from '../../types';
 
 type WinGoDuration = 30 | 60 | 180 | 300;
-type BetTargetType = 'green' | 'purple' | 'violet' | 'red' | 'big' | 'small';
+type BetTargetType = 'green' | 'purple' | 'violet' | 'red' | 'big' | 'small' | number;
 
 interface BetOrder {
   id: string;
@@ -489,7 +489,7 @@ export const ColorPredictionGame: React.FC = () => {
   };
 
 
-  // Open Bet Drawer for one of the 5 options: BIG, SMALL, GREEN, VIOLET, RED
+  // Open Bet Drawer for BIG, SMALL, GREEN, VIOLET, RED, or Numbers 0-9
   const openBetDrawer = (target: BetTargetType) => {
     if (timeLeft <= 5) return; // Betting closed in last 5 seconds
 
@@ -498,7 +498,13 @@ export const ColorPredictionGame: React.FC = () => {
     let payoutLabel = '2.0X Multiplier';
     let themeColor: 'green' | 'purple' | 'red' | 'yellow' | 'blue' = 'green';
 
-    if (target === 'green') {
+    if (typeof target === 'number') {
+      label = `Number ${target}`;
+      payoutLabel = '9.0X Multiplier';
+      if (target === 0 || target === 5) themeColor = 'purple';
+      else if ([1, 3, 7, 9].includes(target)) themeColor = 'green';
+      else themeColor = 'red';
+    } else if (target === 'green') {
       label = 'GREEN';
       payoutLabel = '2.0X Multiplier';
       themeColor = 'green';
@@ -545,10 +551,12 @@ export const ColorPredictionGame: React.FC = () => {
       return;
     }
 
-    // Set exact multipliers: BIG = 2x, SMALL = 2x, RED = 2x, GREEN = 2x, VIOLET = 3.5x
+    // Set exact multipliers: BIG = 2x, SMALL = 2x, RED = 2x, GREEN = 2x, VIOLET = 3.5x, Number 0-9 = 9x
     let mult = 2.0;
     if (betModal.target === 'purple' || betModal.target === 'violet') {
       mult = 3.5;
+    } else if (typeof betModal.target === 'number') {
+      mult = 9.0;
     }
 
     const res = submitWinGoBet({
@@ -986,6 +994,32 @@ export const ColorPredictionGame: React.FC = () => {
             </button>
           </div>
 
+          {/* Number Betting Grid: 0 to 9 (9x Multiplier) */}
+          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
+                Select Number
+              </span>
+              <span className="text-[11px] font-black text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
+                9x Payout
+              </span>
+            </div>
+            <div className="grid grid-cols-5 gap-2.5 justify-items-center">
+              {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  disabled={timeLeft <= 5}
+                  onClick={() => openBetDrawer(num)}
+                  className="cursor-pointer disabled:opacity-40 transition-transform hover:scale-105 active:scale-95 focus:outline-none"
+                  aria-label={`Bet on Number ${num}`}
+                >
+                  {renderBall(num, 'md')}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Row 2: BIG and SMALL (BIG must display only BIG; SMALL must display only SMALL. No extra text, symbols or numbers) */}
           <div className="grid grid-cols-2 gap-3">
             <button
@@ -1297,6 +1331,22 @@ export const ColorPredictionGame: React.FC = () => {
                       const isPending = item.status === 'Pending';
                       const isWin = !isPending && item.isWin;
 
+                      const betOnLabel =
+                        item.selectedOption ||
+                        (item.target !== undefined
+                          ? !isNaN(Number(item.target))
+                            ? `Number ${item.target}`
+                            : item.target.toLowerCase() === 'purple'
+                            ? 'VIOLET'
+                            : item.target.toUpperCase()
+                          : item.choice.replace(/\s*\[Issue\s+.*?\]/, '').trim());
+
+                      let resNum = item.resultNumber;
+                      if (resNum === undefined && item.outcome) {
+                        const match = item.outcome.match(/Number\s+(\d+)/);
+                        if (match) resNum = parseInt(match[1], 10);
+                      }
+
                       return (
                         <div
                           key={item.id || idx}
@@ -1304,7 +1354,7 @@ export const ColorPredictionGame: React.FC = () => {
                             playSound('click');
                             setSelectedBetForDetail(item);
                           }}
-                          className={`p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer hover:shadow-xs active:scale-[0.99] select-none ${
+                          className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-2 cursor-pointer hover:shadow-xs active:scale-[0.99] select-none ${
                             isPending
                               ? 'bg-amber-50/90 border-amber-300 hover:border-amber-400'
                               : isWin
@@ -1312,10 +1362,10 @@ export const ColorPredictionGame: React.FC = () => {
                               : 'bg-red-50/90 border-red-300 hover:border-red-400'
                           }`}
                         >
-                          {/* Simplified betting history with Win/Loss badge and Amount */}
-                          <div className="flex items-center gap-2.5">
+                          {/* Status Badge + Bet Option/Number + Period & Drawn Number */}
+                          <div className="flex items-center gap-2.5 min-w-0">
                             <span
-                              className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-xs ${
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider shadow-xs shrink-0 ${
                                 isPending
                                   ? 'bg-amber-500 text-white'
                                   : isWin
@@ -1325,12 +1375,25 @@ export const ColorPredictionGame: React.FC = () => {
                             >
                               {isPending ? 'PENDING' : isWin ? 'WIN' : 'LOSS'}
                             </span>
-                            <span className="text-[11px] font-mono text-slate-600 font-bold">
-                              #{item.period ? item.period.slice(-4) : item.id.slice(-4)}
-                            </span>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-xs font-black text-slate-900 font-display truncate">
+                                  Bet: {betOnLabel}
+                                </span>
+                                {!isPending && resNum !== undefined && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-white/80 px-1.5 py-0.5 rounded-md border border-slate-200">
+                                    <span>Result:</span>
+                                    <strong className="font-mono text-slate-900">{resNum}</strong>
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-500 font-semibold block">
+                                #{item.period ? item.period.slice(-4) : item.id.slice(-4)}
+                              </span>
+                            </div>
                           </div>
 
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2.5 shrink-0">
                             <span
                               className={`font-mono font-black text-sm tabular-nums ${
                                 isPending
@@ -1346,7 +1409,7 @@ export const ColorPredictionGame: React.FC = () => {
                                 ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
                                 : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
                             </span>
-                            <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
+                            <div className="flex items-center gap-0.5 text-[11px] font-bold text-slate-500">
                               <span className="hidden sm:inline">Details</span>
                               <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                             </div>
@@ -1617,7 +1680,9 @@ export const ColorPredictionGame: React.FC = () => {
 
             <div className="space-y-2.5 text-[11px] text-slate-600 leading-relaxed">
               <p>
-                <strong className="text-slate-900">1. Five Betting Options &amp; Exact Multipliers:</strong>
+                <strong className="text-slate-900">1. Betting Options &amp; Exact Multipliers:</strong>
+                <br />
+                • <strong>Numbers 0–9:</strong> 9x Multiplier (Exact drawn number match)
                 <br />
                 • <strong>BIG:</strong> 2x Multiplier (Drawn numbers 5, 6, 7, 8, 9)
                 <br />

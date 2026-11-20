@@ -78,6 +78,18 @@ export const Navbar: React.FC = () => {
           >
             Wallet & Profile
           </button>
+          <button
+            type="button"
+            onClick={() => handleNav('refer')}
+            className={`transition-colors whitespace-nowrap cursor-pointer hover:text-rose-600 flex items-center gap-1 ${
+              activeView === 'refer' ? 'text-rose-600 border-b-2 border-rose-500 pb-0.5' : 'text-slate-600'
+            }`}
+          >
+            <span>Refer & Earn</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-black">
+              ₹77
+            </span>
+          </button>
         </nav>
 
         {/* Zone 3: Primary Action & Wallet Balance */}
@@ -168,6 +180,16 @@ export const Navbar: React.FC = () => {
           >
             <span>Withdrawal (Bank Payouts)</span>
             <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-extrabold">0% Fee</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleNav('refer')}
+            className={`w-full text-left py-2.5 px-3 rounded-xl text-sm font-bold flex items-center justify-between ${
+              activeView === 'refer' ? 'bg-rose-50 text-rose-600' : 'text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            <span>Refer & Earn</span>
+            <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-extrabold">₹77 + ₹355</span>
           </button>
           <button
             type="button"

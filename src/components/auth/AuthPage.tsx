@@ -29,10 +29,21 @@ export const AuthPage: React.FC = () => {
   const [regNumber, setRegNumber] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
-  const [regInviteCode, setRegInviteCode] = useState('COBCLUBVIP');
+  const [regInviteCode, setRegInviteCode] = useState('');
   const [showRegPassword, setShowRegPassword] = useState(false);
   const [showRegConfirmPassword, setShowRegConfirmPassword] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(true);
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const refParam = params.get('ref');
+      if (refParam && refParam.trim()) {
+        setRegInviteCode(refParam.trim().toUpperCase());
+        setActiveTab('register');
+      }
+    } catch {}
+  }, []);
 
   // Forgot Password Form State (OTP based)
   const [forgotNumber, setForgotNumber] = useState('');
@@ -89,7 +100,7 @@ export const AuthPage: React.FC = () => {
 
     setIsLoading(true);
     setTimeout(() => {
-      const res = register(regNumber, regPassword, regConfirmPassword);
+      const res = register(regNumber, regPassword, regConfirmPassword, regInviteCode);
       setIsLoading(false);
       if (!res.success) {
         setErrorMessage(res.error || 'Registration failed.');
@@ -457,16 +468,17 @@ export const AuthPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Invite Code (Optional) */}
+              {/* Invite / Referral Code (Optional) */}
               <div className="space-y-1">
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  Invite Code (Optional)
+                  Referral / Invite Code (Optional)
                 </label>
                 <input
                   type="text"
+                  placeholder="Enter friend's referral code (e.g. COB8892)"
                   value={regInviteCode}
-                  onChange={(e) => setRegInviteCode(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-rose-500 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-mono uppercase tracking-wider focus:outline-none"
+                  onChange={(e) => setRegInviteCode(e.target.value.toUpperCase())}
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-rose-500 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 font-mono uppercase tracking-wider focus:outline-none"
                 />
               </div>
 

@@ -13,6 +13,9 @@ import {
   DailyBonusRecord,
   PlayerBetRecord,
   WinGoBetOrderInput,
+  ReferralRecord,
+  ReferralMilestoneBonus,
+  ReferralStats,
 } from '../types';
 import { soundManager } from '../utils/audio';
 import {
@@ -47,6 +50,7 @@ interface StoredAccount {
   passwordHash: string;
   memberId: string;
   registeredAt: number;
+  referredBy?: string;
 }
 
 interface GameContextType {
@@ -65,7 +69,12 @@ interface GameContextType {
   supabaseStatus: SupabaseSyncStatus;
   refreshFromSupabase: () => Promise<void>;
   login: (phoneNumber: string, password: string) => { success: boolean; error?: string };
-  register: (phoneNumber: string, password: string, confirmPassword: string) => { success: boolean; error?: string };
+  register: (
+    phoneNumber: string,
+    password: string,
+    confirmPassword: string,
+    inviteCode?: string
+  ) => { success: boolean; error?: string };
   sendPasswordResetOtp: (phoneNumber: string) => { success: boolean; otp?: string; error?: string };
   resetPasswordWithOtp: (
     phoneNumber: string,
@@ -118,6 +127,9 @@ interface GameContextType {
   showFirstDepositPrompt: boolean;
   setShowFirstDepositPrompt: (open: boolean) => void;
   firstDepositPromptMessage: string;
+  userReferrals: ReferralRecord[];
+  userReferralBonuses: ReferralMilestoneBonus[];
+  referralStats: ReferralStats;
 }
 
 export const DAILY_BONUS_TIERS = [
@@ -138,6 +150,12 @@ const STORAGE_KEY_SOUND = 'cobclub_sound_pref_v1';
 const STORAGE_KEY_RECENT = 'cobclub_recent_games_v1';
 const STORAGE_KEY_MASTER_PLAYER_BETS = 'cobclub_master_player_records_v1';
 const STORAGE_KEY_MASTER_DEPOSITS = 'cobclub_master_deposits_v1';
+const STORAGE_KEY_REFERRALS = 'cobclub_referrals_v1';
+const STORAGE_KEY_REFERRAL_BONUSES = 'cobclub_referral_bonuses_v1';
+
+export const REFERRAL_REWARD_AMOUNT = 77;
+export const REFERRAL_MILESTONE_TARGET = 5;
+export const REFERRAL_MILESTONE_BONUS = 355;
 
 export const BONUS_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
@@ -281,6 +299,30 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return [];
     }
   });
+
+  const [referrals, setReferrals] = useState<ReferralRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_REFERRALS);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [referralMilestoneBonuses, setReferralMilestoneBonuses] = useState<ReferralMilestoneBonus[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_REFERRAL_BONUSES);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const referralsRef = useRef(referrals);
+  referralsRef.current = referrals;
+
+  const referralMilestoneBonusesRef = useRef(referralMilestoneBonuses);
+  referralMilestoneBonusesRef.current = referralMilestoneBonuses;
 
   const [recentlyPlayed, setRecentlyPlayed] = useState<GameId[]>(() => {
     try {
@@ -695,7 +737,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const register = (
     phoneNumber: string,
     password: string,
-    confirmPassword: string
+    confirmPassword: string,
+    inviteCode?: string
   ): { success: boolean; error?: string } => {
     const cleanedPhone = phoneNumber.trim().replace(/\D/g, '');
     if (cleanedPhone.length < 10) {
@@ -713,21 +756,65 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, error: 'An account with this phone number already exists' };
     }
 
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    const newMemberId = `COB${randomSuffix}`;
+    const cleanedInvite = (inviteCode || '').trim().toUpperCase();
+    const cleanedInviteDigits = cleanedInvite.replace(/\D/g, '');
+    let matchedReferrer: StoredAccount | undefined;
+
+    if (cleanedInvite && cleanedInvite !== 'COBCLUBVIP') {
+      matchedReferrer = accounts.find(
+        (a) =>
+          a.memberId.toUpperCase() === cleanedInvite ||
+          (cleanedInviteDigits.length >= 10 && a.phoneNumber === cleanedInviteDigits)
+      );
+      if (matchedReferrer && matchedReferrer.phoneNumber === cleanedPhone) {
+        return { success: false, error: 'You cannot use your own referral code' };
+      }
+    }
+
+    let newMemberId = `COB${Math.floor(1000 + Math.random() * 9000)}`;
+    while (accounts.some((a) => a.memberId === newMemberId)) {
+      newMemberId = `COB${Math.floor(1000 + Math.random() * 9000)}`;
+    }
+
+    const now = Date.now();
     const newAccount: StoredAccount = {
       phoneNumber: cleanedPhone,
       passwordHash: password,
       memberId: newMemberId,
-      registeredAt: Date.now(),
+      registeredAt: now,
+      referredBy: matchedReferrer?.memberId,
     };
 
-    setAccounts((prev) => [...prev, newAccount]);
+    const nextAccounts = [...accounts, newAccount];
+    setAccounts(nextAccounts);
+    try {
+      localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(nextAccounts));
+    } catch {}
+
+    if (matchedReferrer) {
+      const newRefRecord: ReferralRecord = {
+        id: `REF_${now}_${Math.random().toString(36).substring(2, 6)}`,
+        referrerMemberId: matchedReferrer.memberId,
+        referrerPhone: matchedReferrer.phoneNumber,
+        refereeMemberId: newMemberId,
+        refereePhone: cleanedPhone,
+        registeredAt: now,
+        firstDepositCompleted: false,
+        rewardAmount: REFERRAL_REWARD_AMOUNT,
+      };
+      const updatedRefs = [newRefRecord, ...referralsRef.current];
+      referralsRef.current = updatedRefs;
+      setReferrals(updatedRefs);
+      try {
+        localStorage.setItem(STORAGE_KEY_REFERRALS, JSON.stringify(updatedRefs));
+      } catch {}
+    }
 
     const userProfile: UserProfile = {
       phoneNumber: cleanedPhone,
       memberId: newMemberId,
-      registeredAt: Date.now(),
+      registeredAt: now,
+      referredBy: matchedReferrer?.memberId,
     };
 
     // Initialize fresh account state & sync to Supabase
@@ -1419,6 +1506,116 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return newRecord;
   };
 
+  // Helper to credit any user (currently active or offline) accurately in localStorage + state + Supabase
+  const creditUserWallet = (targetPhone: string, targetMemberId: string, amount: number) => {
+    if (amount <= 0) return;
+
+    const isActive =
+      userRef.current &&
+      (userRef.current.phoneNumber === targetPhone || userRef.current.memberId === targetMemberId);
+
+    if (isActive) {
+      const nextBal = balanceRef.current + amount;
+      balanceRef.current = nextBal;
+      setBalance(nextBal);
+      try {
+        localStorage.setItem(getUserKey(targetPhone, 'balance'), nextBal.toString());
+      } catch {}
+      updateWalletBalanceInSupabase(targetMemberId, targetPhone, nextBal);
+      return;
+    }
+
+    try {
+      const savedBal = localStorage.getItem(getUserKey(targetPhone, 'balance'));
+      const currentBal = savedBal !== null ? Math.max(0, parseInt(savedBal, 10)) : INITIAL_BALANCE;
+      const nextBal = currentBal + amount;
+      localStorage.setItem(getUserKey(targetPhone, 'balance'), nextBal.toString());
+
+      const rawAccs = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
+      if (rawAccs) {
+        const accs = JSON.parse(rawAccs);
+        const idx = accs.findIndex((a: any) => a.phoneNumber === targetPhone || a.memberId === targetMemberId);
+        if (idx >= 0) {
+          accs[idx].balance = nextBal;
+          localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(accs));
+        }
+      }
+      updateWalletBalanceInSupabase(targetMemberId, targetPhone, nextBal);
+    } catch (err) {
+      console.warn('Error crediting wallet:', err);
+    }
+  };
+
+  // Process Refer & Earn rewards: ₹77 after referred friend completes 1st deposit, plus ₹355 extra every 5 qualified referrals
+  const processReferralRewardForDeposit = (refereePhone?: string, refereeMemberId?: string) => {
+    const currentRefs = referralsRef.current;
+    const targetRef = currentRefs.find(
+      (r) =>
+        !r.firstDepositCompleted &&
+        ((refereePhone && r.refereePhone === refereePhone) ||
+          (refereeMemberId && r.refereeMemberId === refereeMemberId))
+    );
+
+    if (!targetRef) return;
+
+    const now = Date.now();
+    const updatedRefs = currentRefs.map((r) =>
+      r.id === targetRef.id
+        ? {
+            ...r,
+            firstDepositCompleted: true,
+            firstDepositAt: now,
+            rewardAmount: REFERRAL_REWARD_AMOUNT,
+          }
+        : r
+    );
+    referralsRef.current = updatedRefs;
+    setReferrals(updatedRefs);
+    try {
+      localStorage.setItem(STORAGE_KEY_REFERRALS, JSON.stringify(updatedRefs));
+    } catch {}
+
+    // 1. Credit ₹77 for completed 1st deposit referral
+    creditUserWallet(targetRef.referrerPhone, targetRef.referrerMemberId, REFERRAL_REWARD_AMOUNT);
+
+    // 2. Check if referrer crossed a multiple of 5 qualified referrals for ₹355 extra bonus
+    const qualifiedCount = updatedRefs.filter(
+      (r) => r.referrerMemberId === targetRef.referrerMemberId && r.firstDepositCompleted
+    ).length;
+
+    const eligibleMilestones = Math.floor(qualifiedCount / REFERRAL_MILESTONE_TARGET);
+    const existingBonuses = referralMilestoneBonusesRef.current;
+    const awardedCount = existingBonuses.filter(
+      (b) => b.referrerMemberId === targetRef.referrerMemberId
+    ).length;
+
+    if (eligibleMilestones > awardedCount) {
+      const newBonuses: ReferralMilestoneBonus[] = [];
+      let totalExtraToCredit = 0;
+
+      for (let m = awardedCount + 1; m <= eligibleMilestones; m++) {
+        totalExtraToCredit += REFERRAL_MILESTONE_BONUS;
+        newBonuses.push({
+          id: `REFBONUS_${now}_${m}`,
+          referrerMemberId: targetRef.referrerMemberId,
+          referrerPhone: targetRef.referrerPhone,
+          milestoneCount: m * REFERRAL_MILESTONE_TARGET,
+          amount: REFERRAL_MILESTONE_BONUS,
+          awardedAt: now,
+        });
+      }
+
+      const updatedBonuses = [...newBonuses, ...existingBonuses];
+      referralMilestoneBonusesRef.current = updatedBonuses;
+      setReferralMilestoneBonuses(updatedBonuses);
+      try {
+        localStorage.setItem(STORAGE_KEY_REFERRAL_BONUSES, JSON.stringify(updatedBonuses));
+      } catch {}
+
+      creditUserWallet(targetRef.referrerPhone, targetRef.referrerMemberId, totalExtraToCredit);
+    }
+  };
+
   const approveDepositRequest = (depositId: string): { success: boolean; error?: string } => {
     const req =
       masterDepositRequests.find((d) => d.id === depositId) ||
@@ -1452,6 +1649,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (isCurrentActiveUser) {
       const nextBal = balance + req.totalCredit;
+      balanceRef.current = nextBal;
       setBalance(nextBal);
       setDepositRecords((prev) => prev.map((d) => (d.id === req.id ? updatedReq : d)));
       playSound('jackpot');
@@ -1467,12 +1665,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } else {
       // Target user is another registered user: credit their stored balance
+      let offlineNextBal = req.totalCredit;
       try {
         if (req.phoneNumber) {
           const targetPhone = req.phoneNumber;
           const savedBal = localStorage.getItem(getUserKey(targetPhone, 'balance'));
           const currentBal = savedBal !== null ? Math.max(0, parseInt(savedBal, 10)) : INITIAL_BALANCE;
           const nextBal = currentBal + req.totalCredit;
+          offlineNextBal = nextBal;
           localStorage.setItem(getUserKey(targetPhone, 'balance'), nextBal.toString());
           localStorage.setItem(getUserKey(targetPhone, 'has_deposited'), 'true');
 
@@ -1498,9 +1698,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (req.memberId && req.phoneNumber) {
-        updateWalletBalanceInSupabase(req.memberId, req.phoneNumber, req.totalCredit);
+        updateWalletBalanceInSupabase(req.memberId, req.phoneNumber, offlineNextBal);
       }
     }
+
+    // 3. Process referral reward if this user was referred and hasn't completed first deposit yet
+    processReferralRewardForDeposit(req.phoneNumber, req.memberId);
 
     updateDepositStatusInSupabase(req.id, 'Completed');
     return { success: true };
@@ -1649,6 +1852,43 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { success: true, record };
   };
 
+  const userReferrals = useMemo(() => {
+    if (!user?.memberId) return [];
+    return referrals
+      .filter((r) => r.referrerMemberId === user.memberId || r.referrerPhone === user.phoneNumber)
+      .sort((a, b) => b.registeredAt - a.registeredAt);
+  }, [referrals, user?.memberId, user?.phoneNumber]);
+
+  const userReferralBonuses = useMemo(() => {
+    if (!user?.memberId) return [];
+    return referralMilestoneBonuses
+      .filter((b) => b.referrerMemberId === user.memberId || b.referrerPhone === user.phoneNumber)
+      .sort((a, b) => b.awardedAt - a.awardedAt);
+  }, [referralMilestoneBonuses, user?.memberId, user?.phoneNumber]);
+
+  const referralStats: ReferralStats = useMemo(() => {
+    const qualifiedCount = userReferrals.filter((r) => r.firstDepositCompleted).length;
+    const totalReferred = userReferrals.length;
+    const pendingCount = totalReferred - qualifiedCount;
+    const totalEarnedFrom77 = qualifiedCount * REFERRAL_REWARD_AMOUNT;
+    const milestonesCompleted = Math.floor(qualifiedCount / REFERRAL_MILESTONE_TARGET);
+    const extraBonusEarned355 = userReferralBonuses.reduce((sum, b) => sum + b.amount, 0);
+    const remainder = qualifiedCount % REFERRAL_MILESTONE_TARGET;
+    const progressToNext5 = qualifiedCount > 0 && remainder === 0 ? REFERRAL_MILESTONE_TARGET : remainder;
+
+    return {
+      referralCode: user?.memberId || 'COB8892',
+      totalReferred,
+      qualifiedCount,
+      pendingCount,
+      totalEarnedFrom77,
+      extraBonusEarned355,
+      totalEarned: totalEarnedFrom77 + extraBonusEarned355,
+      progressToNext5,
+      milestonesCompleted,
+    };
+  }, [user?.memberId, userReferrals, userReferralBonuses]);
+
   return (
     <GameContext.Provider
       value={{
@@ -1706,6 +1946,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         showFirstDepositPrompt,
         setShowFirstDepositPrompt,
         firstDepositPromptMessage,
+        userReferrals,
+        userReferralBonuses,
+        referralStats,
       }}
     >
       {children}

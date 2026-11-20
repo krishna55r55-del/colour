@@ -16,6 +16,7 @@ import {
   Crown,
   Lock,
   X,
+  Users,
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { ALL_GAMES } from '../../data/games';
@@ -33,6 +34,7 @@ export const HomeView: React.FC = () => {
     winManagerEnabled,
     setWinManagerEnabled,
     masterDepositRequests,
+    referralStats,
   } = useGame();
 
   const [showPassModal, setShowPassModal] = useState(false);
@@ -306,6 +308,52 @@ export const HomeView: React.FC = () => {
               }`}
             >
               <span>{canClaimDailyBonus ? 'Claim Points' : 'View Calendar'}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Refer & Earn Banner */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div
+          onClick={() => {
+            playSound('click');
+            setActiveView('refer');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className="cursor-pointer rounded-2xl p-4 sm:p-5 border border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-amber-50 hover:border-emerald-300 shadow-xs hover:shadow-md transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        >
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+              <Users className="w-6 h-6" />
+            </div>
+
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  ₹77 Per Refer
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200">
+                  5 Refers = ₹355 Extra
+                </span>
+              </div>
+
+              <h3 className="text-sm sm:text-base font-black font-display text-slate-900 mt-1">
+                Refer Friends & Earn Instant Cash Bonus
+              </h3>
+              <p className="text-xs text-slate-500">
+                Get ₹77 after your friend completes 1 deposit · Progress: {referralStats.progressToNext5}/5 toward ₹355 extra
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-end sm:self-auto shrink-0">
+            <button
+              type="button"
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <span>Refer & Earn</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>

@@ -317,7 +317,12 @@ export const evaluateWinGoBet = (
 } => {
   const isHit = isTargetWinning(target as any, drawnNumber);
   const colorName = getOutcomeColorName(drawnNumber);
-  const optName = String(target).toUpperCase();
+  const rawTarget = String(target).toLowerCase();
+  const optName = !isNaN(Number(target))
+    ? `Number ${target}`
+    : rawTarget === 'purple' || rawTarget === 'violet'
+    ? 'VIOLET'
+    : String(target).toUpperCase();
 
   if (!isHit) {
     return {

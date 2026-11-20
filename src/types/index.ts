@@ -90,6 +90,40 @@ export interface UserProfile {
   lastDailyBonusAt?: number;
   dailyStreak?: number;
   totalBonusClaimed?: number;
+  referredBy?: string;
+}
+
+export interface ReferralRecord {
+  id: string;
+  referrerMemberId: string;
+  referrerPhone: string;
+  refereeMemberId: string;
+  refereePhone: string;
+  registeredAt: number;
+  firstDepositCompleted: boolean;
+  firstDepositAt?: number;
+  rewardAmount: number; // 77 per qualified deposit
+}
+
+export interface ReferralMilestoneBonus {
+  id: string;
+  referrerMemberId: string;
+  referrerPhone: string;
+  milestoneCount: number; // 5, 10, 15...
+  amount: number; // 355 extra per 5 qualified referrals
+  awardedAt: number;
+}
+
+export interface ReferralStats {
+  referralCode: string;
+  totalReferred: number;
+  qualifiedCount: number;
+  pendingCount: number;
+  totalEarnedFrom77: number;
+  extraBonusEarned355: number;
+  totalEarned: number;
+  progressToNext5: number; // 0..4 (or 5 when milestone just hit before next cycle)
+  milestonesCompleted: number; // count of 5-referral ₹355 bonuses earned
 }
 
 export interface PlayerBetRecord extends GameHistoryItem {
@@ -156,4 +190,4 @@ export interface SupabaseSyncStatus {
   lastSyncedAt: number | null;
 }
 
-export type ViewType = 'home' | 'all-games' | 'history' | 'profile' | 'game' | 'deposit' | 'withdraw' | 'admin';
+export type ViewType = 'home' | 'all-games' | 'history' | 'profile' | 'game' | 'deposit' | 'withdraw' | 'admin' | 'refer';

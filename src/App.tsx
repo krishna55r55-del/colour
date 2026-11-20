@@ -15,6 +15,7 @@ import { ProfileView } from './components/views/ProfileView';
 import { DepositView } from './components/views/DepositView';
 import { WithdrawView } from './components/views/WithdrawView';
 import { AdminApprovalView } from './components/views/AdminApprovalView';
+import { ReferView } from './components/views/ReferView';
 
 // 9 Playable Games
 import { ColorPredictionGame } from './components/games/ColorPredictionGame';
@@ -88,6 +89,8 @@ const AppContent: React.FC = () => {
         return <WithdrawView />;
       case 'admin':
         return <AdminApprovalView />;
+      case 'refer':
+        return <ReferView />;
       default:
         return <HomeView />;
     }

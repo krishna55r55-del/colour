@@ -182,49 +182,93 @@ export const HistoryView: React.FC = () => {
           {/* Simplified History Log List: Main history shows only one compact status per bet */}
           {filteredPersonalHistory.length > 0 ? (
             <div className="space-y-2">
-              {filteredPersonalHistory.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => {
-                    playSound('click');
-                    setSelectedBetForDetail(item);
-                  }}
-                  className={`p-3 sm:p-3.5 rounded-2xl border transition-all flex items-center justify-between cursor-pointer hover:shadow-xs active:scale-[0.99] select-none ${
-                    item.isWin
-                      ? 'bg-emerald-50/90 border-emerald-300 hover:border-emerald-400'
-                      : 'bg-red-50/90 border-red-300 hover:border-red-400'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`px-3.5 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-xs ${
-                        item.isWin ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
-                      }`}
-                    >
-                      {item.isWin ? 'WIN' : 'LOSS'}
-                    </span>
-                    <span className="font-mono text-xs font-bold text-slate-700">
-                      #{item.period ? item.period.slice(-4) : item.id.slice(-4)}
-                    </span>
-                  </div>
+              {filteredPersonalHistory.map((item) => {
+                const isPending = item.status === 'Pending';
+                const betOnLabel =
+                  item.selectedOption ||
+                  (item.target !== undefined
+                    ? !isNaN(Number(item.target))
+                      ? `Number ${item.target}`
+                      : item.target.toLowerCase() === 'purple'
+                      ? 'VIOLET'
+                      : item.target.toUpperCase()
+                    : item.choice.replace(/\s*\[Issue\s+.*?\]/, '').trim());
 
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`font-mono font-black text-sm tabular-nums ${
-                        item.isWin ? 'text-emerald-700' : 'text-red-600'
-                      }`}
-                    >
-                      {item.isWin
-                        ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
-                        : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
-                    </span>
-                    <div className="flex items-center gap-1 text-xs font-bold text-slate-500">
-                      <span className="hidden sm:inline">View Details</span>
-                      <ChevronRight className="w-4 h-4 text-slate-400" />
+                let resNum = item.resultNumber;
+                if (resNum === undefined && item.outcome) {
+                  const match = item.outcome.match(/Number\s+(\d+)/);
+                  if (match) resNum = parseInt(match[1], 10);
+                }
+
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => {
+                      playSound('click');
+                      setSelectedBetForDetail(item);
+                    }}
+                    className={`p-3 sm:p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-2 cursor-pointer hover:shadow-xs active:scale-[0.99] select-none ${
+                      isPending
+                        ? 'bg-amber-50/90 border-amber-300 hover:border-amber-400'
+                        : item.isWin
+                        ? 'bg-emerald-50/90 border-emerald-300 hover:border-emerald-400'
+                        : 'bg-red-50/90 border-red-300 hover:border-red-400'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-xs shrink-0 ${
+                          isPending
+                            ? 'bg-amber-500 text-white'
+                            : item.isWin
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-red-600 text-white'
+                        }`}
+                      >
+                        {isPending ? 'PENDING' : item.isWin ? 'WIN' : 'LOSS'}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-black text-slate-900 font-display truncate">
+                            Bet: {betOnLabel}
+                          </span>
+                          {!isPending && resNum !== undefined && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-white/80 px-1.5 py-0.5 rounded-md border border-slate-200">
+                              <span>Result:</span>
+                              <strong className="font-mono text-slate-900">{resNum}</strong>
+                            </span>
+                          )}
+                        </div>
+                        <span className="font-mono text-[11px] font-semibold text-slate-500 block">
+                          #{item.period ? item.period.slice(-4) : item.id.slice(-4)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span
+                        className={`font-mono font-black text-sm tabular-nums ${
+                          isPending
+                            ? 'text-amber-700'
+                            : item.isWin
+                            ? 'text-emerald-700'
+                            : 'text-red-600'
+                        }`}
+                      >
+                        {isPending
+                          ? `₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`
+                          : item.isWin
+                          ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
+                          : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
+                      </span>
+                      <div className="flex items-center gap-1 text-xs font-bold text-slate-500">
+                        <span className="hidden sm:inline">View Details</span>
+                        <ChevronRight className="w-4 h-4 text-slate-400" />
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="py-16 text-center rounded-3xl bg-white border border-slate-200 shadow-xs">
