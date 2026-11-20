@@ -133,6 +133,12 @@ export const ColorPredictionGame: React.FC = () => {
     lostBetAmount: 0,
   });
   const [selectedBetForDetail, setSelectedBetForDetail] = useState<GameHistoryItem | null>(null);
+  const [roundReaction, setRoundReaction] = useState<{
+    type: 'win' | 'loss';
+    amount: number;
+    emoji: string;
+    label: string;
+  } | null>(null);
 
   // Mode selection: 30s, 1Min, 3Min, 5Min
   const [selectedDuration, setSelectedDuration] = useState<WinGoDuration>(30);
@@ -355,7 +361,14 @@ export const ColorPredictionGame: React.FC = () => {
           finalCreditedAmount: totalFinalCredited,
           period: periodToResolve,
         });
-        playSound('win');
+        setRoundReaction({
+          type: 'win',
+          amount: totalFinalCredited,
+          emoji: '🥳',
+          label: 'WIN! CONGRATULATIONS!',
+        });
+        setTimeout(() => playSound('win'), 260);
+        setTimeout(() => setRoundReaction(null), 5000);
       } else {
         setLossPosterData({
           isOpen: true,
@@ -365,7 +378,14 @@ export const ColorPredictionGame: React.FC = () => {
           lostBetAmount: totalBet,
           period: periodToResolve,
         });
-        playSound('loss');
+        setRoundReaction({
+          type: 'loss',
+          amount: totalBet,
+          emoji: '💔',
+          label: 'LOSS! NEXT ROUND!',
+        });
+        setTimeout(() => playSound('loss'), 260);
+        setTimeout(() => setRoundReaction(null), 5000);
       }
     }
 
@@ -874,6 +894,29 @@ export const ColorPredictionGame: React.FC = () => {
         </div>
       </div>
 
+      {/* Live Win/Loss Reaction Banner on Game Board */}
+      {roundReaction && (
+        <div
+          className={`mx-3 my-2 px-4 py-2.5 rounded-2xl border flex items-center justify-between shadow-md select-none ${
+            roundReaction.type === 'win'
+              ? 'bg-emerald-600 text-white border-emerald-400 animate-win-pop'
+              : 'bg-red-600 text-white border-red-400 animate-loss-shake'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl animate-bounce">{roundReaction.emoji}</span>
+            <span className="text-xs font-black uppercase tracking-wider font-display">
+              {roundReaction.label}
+            </span>
+          </div>
+          <span className="font-mono font-black text-sm tabular-nums">
+            {roundReaction.type === 'win'
+              ? `+₹${roundReaction.amount.toFixed(2)}`
+              : `-₹${roundReaction.amount.toFixed(2)}`}
+          </span>
+        </div>
+      )}
+
       {/* 4. Main Betting Arena: Green, Violet, Red */}
       <div className="relative px-3 space-y-3">
         {/* BIG SCREEN 5-SECOND COUNTDOWN OVERLAY ON SCREEN WHERE BETTING CLOSED */}
@@ -1269,7 +1312,7 @@ export const ColorPredictionGame: React.FC = () => {
                               : 'bg-red-50/90 border-red-300 hover:border-red-400'
                           }`}
                         >
-                          {/* Simplified betting history: Main history shows only one compact status per bet */}
+                          {/* Simplified betting history with Win/Loss badge and Amount */}
                           <div className="flex items-center gap-2.5">
                             <span
                               className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-xs ${
@@ -1287,9 +1330,26 @@ export const ColorPredictionGame: React.FC = () => {
                             </span>
                           </div>
 
-                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500">
-                            <span>Details</span>
-                            <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                          <div className="flex items-center gap-3">
+                            <span
+                              className={`font-mono font-black text-sm tabular-nums ${
+                                isPending
+                                  ? 'text-amber-700'
+                                  : isWin
+                                  ? 'text-emerald-700'
+                                  : 'text-red-600'
+                              }`}
+                            >
+                              {isPending
+                                ? `₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`
+                                : isWin
+                                ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
+                                : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
+                            </span>
+                            <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
+                              <span className="hidden sm:inline">Details</span>
+                              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                            </div>
                           </div>
                         </div>
                       );

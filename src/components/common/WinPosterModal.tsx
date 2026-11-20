@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import confetti from 'canvas-confetti';
 import { Trophy, X, Sparkles, CheckCircle2 } from 'lucide-react';
+import { soundManager } from '../../utils/audio';
 
 export interface WinPosterData {
   isOpen: boolean;
@@ -19,13 +20,23 @@ interface WinPosterModalProps {
   onClose: () => void;
 }
 
+const WIN_REACTIONS = [
+  { emoji: '🥳', label: 'Party!' },
+  { emoji: '🔥', label: 'On Fire!' },
+  { emoji: '🏆', label: 'Champion!' },
+  { emoji: '💰', label: 'Cash In!' },
+];
+
 export const WinPosterModal: React.FC<WinPosterModalProps> = ({ data, onClose }) => {
+  const [activeReaction, setActiveReaction] = useState<string | null>(null);
+
   useEffect(() => {
     if (data.isOpen) {
+      setActiveReaction(null);
       try {
         confetti({
-          particleCount: 70,
-          spread: 70,
+          particleCount: 80,
+          spread: 75,
           origin: { y: 0.5 },
           colors: ['#10b981', '#34d399', '#f59e0b', '#fbbf24', '#ffffff'],
         });
@@ -34,6 +45,19 @@ export const WinPosterModal: React.FC<WinPosterModalProps> = ({ data, onClose })
   }, [data.isOpen]);
 
   if (!data.isOpen) return null;
+
+  const triggerExtraCelebration = (emoji: string, label: string) => {
+    setActiveReaction(`${emoji} ${label}`);
+    soundManager.playWin();
+    try {
+      confetti({
+        particleCount: 45,
+        spread: 60,
+        origin: { y: 0.55 },
+        colors: ['#10b981', '#fbbf24', '#34d399', '#ffffff'],
+      });
+    } catch {}
+  };
 
   const colorBadge = () => {
     const col = (data.resultColor || '').toLowerCase();
@@ -47,7 +71,7 @@ export const WinPosterModal: React.FC<WinPosterModalProps> = ({ data, onClose })
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm animate-in fade-in duration-200">
       {/* Winning Poster Card - Green Theme */}
-      <div className="relative w-full max-w-sm rounded-3xl overflow-hidden bg-gradient-to-b from-[#064e3b] via-[#047857] to-[#065f46] text-white shadow-2xl border-2 border-emerald-400/50 animate-in zoom-in-95 duration-200">
+      <div className="relative w-full max-w-sm rounded-3xl overflow-hidden bg-gradient-to-b from-[#064e3b] via-[#047857] to-[#065f46] text-white shadow-2xl border-2 border-emerald-400/50 animate-win-pop">
         {/* Glow ambient circles */}
         <div className="absolute -top-16 -right-16 w-44 h-44 rounded-full bg-emerald-400/20 blur-3xl pointer-events-none" />
         <div className="absolute -bottom-16 -left-16 w-44 h-44 rounded-full bg-amber-400/20 blur-3xl pointer-events-none" />
@@ -64,14 +88,18 @@ export const WinPosterModal: React.FC<WinPosterModalProps> = ({ data, onClose })
 
         {/* Poster Header */}
         <div className="pt-6 pb-2 px-6 text-center relative z-10">
-          {/* Trophy Badge */}
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-tr from-amber-400 to-yellow-300 text-emerald-950 flex items-center justify-center shadow-lg shadow-amber-900/30 mb-3 border-2 border-amber-200">
-            <Trophy className="w-9 h-9" strokeWidth={2.3} />
+          {/* Trophy Badge with Floating Win Reactions */}
+          <div className="relative w-28 mx-auto mb-3 flex items-center justify-center">
+            <span className="absolute -left-1 top-1 text-xl animate-float-reaction select-none">🎉</span>
+            <span className="absolute -right-1 top-1 text-xl animate-float-reaction select-none" style={{ animationDelay: '0.4s' }}>🥳</span>
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-400 to-yellow-300 text-emerald-950 flex items-center justify-center shadow-lg shadow-amber-900/30 border-2 border-amber-200 animate-bounce">
+              <Trophy className="w-9 h-9" strokeWidth={2.3} />
+            </div>
           </div>
 
           <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-900/70 border border-emerald-400/40 text-[10px] font-black uppercase tracking-widest text-emerald-200 mb-1">
             <Sparkles className="w-3 h-3 text-amber-300" />
-            <span>Verified Winning Round</span>
+            <span>{activeReaction || '🎉 BOOM! VERIFIED WIN'}</span>
           </div>
 
           <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tight text-white font-display drop-shadow-sm">
@@ -84,12 +112,12 @@ export const WinPosterModal: React.FC<WinPosterModalProps> = ({ data, onClose })
         </div>
 
         {/* Credited Amount Center Banner */}
-        <div className="my-3 mx-4 p-4 rounded-2xl bg-emerald-900/80 border border-emerald-400/30 text-center shadow-inner">
+        <div className="my-2.5 mx-4 p-3.5 rounded-2xl bg-emerald-900/80 border border-emerald-400/30 text-center shadow-inner">
           <span className="text-[11px] font-bold text-emerald-200 uppercase tracking-wider block">
             Final Credited Amount
           </span>
           <div className="text-3xl sm:text-4xl font-black font-mono text-amber-300 tracking-tight tabular-nums mt-0.5 drop-shadow-sm">
-            ₹{data.finalCreditedAmount.toFixed(2)}
+            +₹{data.finalCreditedAmount.toFixed(2)}
           </div>
           <span className="text-[10px] text-emerald-200/80 font-medium block mt-0.5">
             Instantly added to your wallet balance
@@ -97,7 +125,7 @@ export const WinPosterModal: React.FC<WinPosterModalProps> = ({ data, onClose })
         </div>
 
         {/* Detailed Breakdown Card */}
-        <div className="mx-4 mb-4 p-3.5 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15 space-y-2 text-xs">
+        <div className="mx-4 mb-3 p-3.5 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15 space-y-2 text-xs">
           {/* Selected Option & Result Number */}
           <div className="grid grid-cols-2 gap-2 pb-2 border-b border-white/10">
             <div>
@@ -153,6 +181,26 @@ export const WinPosterModal: React.FC<WinPosterModalProps> = ({ data, onClose })
             <span className="font-mono font-black text-amber-300 text-base tabular-nums">
               +₹{data.finalCreditedAmount.toFixed(2)}
             </span>
+          </div>
+        </div>
+
+        {/* Interactive Win Reaction Bar */}
+        <div className="mx-4 mb-3 flex items-center justify-between gap-2 bg-black/20 px-3 py-2 rounded-xl border border-white/10">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-200">
+            React:
+          </span>
+          <div className="flex items-center gap-1.5">
+            {WIN_REACTIONS.map((r) => (
+              <button
+                key={r.label}
+                type="button"
+                onClick={() => triggerExtraCelebration(r.emoji, r.label)}
+                className="w-8 h-8 rounded-lg bg-white/15 hover:bg-white/30 active:scale-90 transition-all flex items-center justify-center text-base cursor-pointer"
+                title={r.label}
+              >
+                {r.emoji}
+              </button>
+            ))}
           </div>
         </div>
 

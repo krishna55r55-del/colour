@@ -164,31 +164,32 @@ class SoundFX {
     } catch {}
   }
 
-  // Regular Win sound
+  // Celebratory Win sound: crisp rising fanfare + sparkling high chord
   public playWin() {
     if (!this.enabled) return;
     try {
       this.initContext();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+      const notes = [523.25, 659.25, 783.99, 1046.5, 1318.51]; // C5, E5, G5, C6, E6
 
       notes.forEach((freq, idx) => {
         if (!this.ctx) return;
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+        osc.type = idx >= 3 ? 'sine' : 'triangle';
+        const startTime = now + idx * 0.075;
+        osc.frequency.setValueAtTime(freq, startTime);
 
-        gain.gain.setValueAtTime(0, now + idx * 0.08);
-        gain.gain.linearRampToValueAtTime(0.18, now + idx * 0.08 + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.22);
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.22, startTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.34);
 
         osc.connect(gain);
         gain.connect(this.ctx.destination);
 
-        osc.start(now + idx * 0.08);
-        osc.stop(now + idx * 0.08 + 0.22);
+        osc.start(startTime);
+        osc.stop(startTime + 0.35);
       });
     } catch {}
   }
@@ -222,30 +223,37 @@ class SoundFX {
     } catch {}
   }
 
-  // Gentle loss sound
+  // Distinct expressive loss reaction sound (descending minor motif)
   public playLoss() {
     if (!this.enabled) return;
     try {
       this.initContext();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      const notes = [320, 260, 210];
+      const notes = [392.0, 349.23, 311.13, 246.94]; // G4, F4, Eb4, B3
 
       notes.forEach((freq, idx) => {
         if (!this.ctx) return;
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + idx * 0.09);
+        osc.type = 'triangle';
+        const startTime = now + idx * 0.11;
+        const duration = idx === notes.length - 1 ? 0.36 : 0.16;
 
-        gain.gain.setValueAtTime(0.1, now + idx * 0.09);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.09 + 0.14);
+        osc.frequency.setValueAtTime(freq, startTime);
+        if (idx === notes.length - 1) {
+          osc.frequency.exponentialRampToValueAtTime(196.0, startTime + duration);
+        }
+
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.18, startTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
 
         osc.connect(gain);
         gain.connect(this.ctx.destination);
 
-        osc.start(now + idx * 0.09);
-        osc.stop(now + idx * 0.09 + 0.14);
+        osc.start(startTime);
+        osc.stop(startTime + duration + 0.01);
       });
     } catch {}
   }

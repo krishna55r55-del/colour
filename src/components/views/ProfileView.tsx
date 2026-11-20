@@ -6,8 +6,6 @@ import {
   Volume2,
   VolumeX,
   LogOut,
-  Lock,
-  X,
   Building,
   ArrowRight,
 } from 'lucide-react';
@@ -23,53 +21,8 @@ export const ProfileView: React.FC = () => {
     user,
     logout,
     setActiveView,
-    winManagerEnabled,
-    setWinManagerEnabled,
     savedBankDetails,
-    withdrawRecords,
-    masterDepositRequests,
   } = useGame();
-
-  const [showPassModal, setShowPassModal] = useState(false);
-  const [passInput, setPassInput] = useState('');
-  const [passError, setPassError] = useState('');
-
-  // Admin Authentication State
-  const [showAdminPinModal, setShowAdminPinModal] = useState(false);
-  const [adminPinInput, setAdminPinInput] = useState('');
-  const [adminPinError, setAdminPinError] = useState('');
-
-  const handleAdminClick = () => {
-    playSound('click');
-    const isAuth = typeof window !== 'undefined' && sessionStorage.getItem('cobclub_admin_session') === 'true';
-    if (isAuth) {
-      setActiveView('admin');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      setAdminPinInput('');
-      setAdminPinError('');
-      setShowAdminPinModal(true);
-    }
-  };
-
-  const handleAdminPinSubmit = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const pin = adminPinInput.trim();
-    if (pin === '8892' || pin === 'admin123' || pin.toLowerCase() === 'admin') {
-      try {
-        sessionStorage.setItem('cobclub_admin_session', 'true');
-      } catch {}
-      setShowAdminPinModal(false);
-      setAdminPinInput('');
-      setAdminPinError('');
-      playSound('win');
-      setActiveView('admin');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      setAdminPinError('Invalid Admin PIN. (Default PIN: 8892)');
-      playSound('loss');
-    }
-  };
 
   const getRank = (rounds: number) => {
     if (rounds >= 100) return { title: 'Legendary Master', color: 'text-amber-400', badge: 'LEGEND' };
@@ -81,31 +34,6 @@ export const ProfileView: React.FC = () => {
   };
 
   const rank = getRank(stats.totalRounds);
-
-  const handleToggleClick = () => {
-    playSound('click');
-    if (!winManagerEnabled) {
-      setPassInput('');
-      setPassError('');
-      setShowPassModal(true);
-    } else {
-      setWinManagerEnabled(false);
-    }
-  };
-
-  const handlePassSubmit = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (passInput === 'Loss123') {
-      setWinManagerEnabled(true);
-      setShowPassModal(false);
-      setPassInput('');
-      setPassError('');
-      playSound('win');
-    } else {
-      setPassError('Access denied. Incorrect security code.');
-      playSound('loss');
-    }
-  };
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
@@ -273,199 +201,6 @@ export const ProfileView: React.FC = () => {
           </span>
         </div>
       </div>
-
-      {/* Discreet nameless ON/OFF button hidden at bottom of profile */}
-      <div className="pt-2 pb-2 flex justify-center items-center">
-        <button
-          type="button"
-          onClick={handleToggleClick}
-          className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-xs ${
-            winManagerEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-          }`}
-          title={winManagerEnabled ? 'ON' : 'OFF'}
-          aria-label={winManagerEnabled ? 'ON' : 'OFF'}
-        >
-          <span
-            className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out flex items-center justify-center text-[9px] font-black uppercase ${
-              winManagerEnabled ? 'translate-x-7 text-emerald-600' : 'translate-x-0 text-slate-500'
-            }`}
-          >
-            {winManagerEnabled ? 'ON' : 'OFF'}
-          </span>
-        </button>
-      </div>
-
-      {/* Small Admin button at the very bottom of profile section */}
-      <div className="pt-1 pb-8 flex flex-col items-center justify-center gap-1">
-        <button
-          type="button"
-          onClick={handleAdminClick}
-          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-100 hover:bg-amber-50 text-slate-700 hover:text-amber-900 border border-slate-200 text-xs font-bold transition-all shadow-2xs cursor-pointer active:scale-95"
-          title="Admin Approval Portal"
-        >
-          <Crown className="w-3.5 h-3.5 text-amber-500" />
-          <span>Admin</span>
-          {masterDepositRequests.filter((d) => d.status === 'Pending').length > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-rose-600 text-white animate-pulse">
-              {masterDepositRequests.filter((d) => d.status === 'Pending').length}
-            </span>
-          )}
-        </button>
-        <span className="text-[10px] text-slate-400 font-medium">Administrator Approval Desk</span>
-      </div>
-
-      {/* Admin PIN Verification Modal (For Admin Approval Access) */}
-      {showAdminPinModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="w-full max-w-xs rounded-2xl bg-white p-5 border border-slate-200 shadow-2xl animate-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
-                  <Crown className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-black text-slate-900 tracking-wide uppercase">
-                    Admin Portal Access
-                  </h3>
-                  <span className="text-[10px] text-slate-400 block">Owner / Administrator</span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAdminPinModal(false);
-                  setAdminPinInput('');
-                  setAdminPinError('');
-                }}
-                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className="text-[11px] text-slate-500 mb-3">
-              Enter Administrator PIN to review and approve player deposit requests:
-            </p>
-
-            <form onSubmit={handleAdminPinSubmit} className="space-y-3">
-              <div>
-                <input
-                  type="password"
-                  value={adminPinInput}
-                  onChange={(e) => {
-                    setAdminPinInput(e.target.value);
-                    if (adminPinError) setAdminPinError('');
-                  }}
-                  placeholder="Enter Admin PIN (8892)"
-                  autoFocus
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 font-mono text-center text-sm font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white"
-                />
-                {adminPinError && (
-                  <p className="text-[11px] font-semibold text-rose-500 mt-1 text-center">
-                    {adminPinError}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAdminPinModal(false);
-                    setAdminPinInput('');
-                    setAdminPinError('');
-                  }}
-                  className="flex-1 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-colors cursor-pointer shadow-xs"
-                >
-                  Unlock Admin
-                </button>
-              </div>
-
-              <div className="text-center pt-1">
-                <span className="text-[10px] text-slate-400 font-mono">
-                  Default PIN: <strong className="text-slate-700">8892</strong>
-                </span>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Secure Password Authentication Modal */}
-      {showPassModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="w-full max-w-xs rounded-2xl bg-white p-5 border border-slate-200 shadow-2xl animate-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700">
-                  <Lock className="w-4 h-4" />
-                </div>
-                <h3 className="text-xs font-bold text-slate-800 tracking-wide uppercase">
-                  Security Verification
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPassModal(false);
-                  setPassInput('');
-                  setPassError('');
-                }}
-                className="text-slate-400 hover:text-slate-600 p-1"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handlePassSubmit} className="space-y-3">
-              <div>
-                <input
-                  type="password"
-                  value={passInput}
-                  onChange={(e) => {
-                    setPassInput(e.target.value);
-                    if (passError) setPassError('');
-                  }}
-                  placeholder="Enter Password"
-                  autoFocus
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 font-mono text-sm tracking-wider focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white"
-                />
-                {passError && (
-                  <p className="text-[11px] font-semibold text-rose-500 mt-1">
-                    {passError}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowPassModal(false);
-                    setPassInput('');
-                    setPassError('');
-                  }}
-                  className="flex-1 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs"
-                >
-                  Confirm
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -63,7 +63,7 @@ export const AdminApprovalView: React.FC = () => {
   const handleUnlockAdmin = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const pin = pinEntry.trim();
-    if (pin === '8892' || pin === 'admin123' || pin.toLowerCase() === 'admin') {
+    if (pin === 'Sweta@1212') {
       try {
         sessionStorage.setItem('cobclub_admin_session', 'true');
       } catch {}
@@ -72,7 +72,7 @@ export const AdminApprovalView: React.FC = () => {
       setPinError('');
       playSound('jackpot');
     } else {
-      setPinError('Access denied. Invalid Admin PIN. (Default PIN: 8892)');
+      setPinError('Access denied. Incorrect password.');
       playSound('loss');
     }
   };
@@ -168,7 +168,7 @@ export const AdminApprovalView: React.FC = () => {
           <form onSubmit={handleUnlockAdmin} className="space-y-3 pt-2">
             <div>
               <label className="text-[11px] font-bold text-slate-600 uppercase block text-left mb-1">
-                Enter Administrator Security PIN
+                Enter Password
               </label>
               <input
                 type="password"
@@ -177,9 +177,9 @@ export const AdminApprovalView: React.FC = () => {
                   setPinEntry(e.target.value);
                   if (pinError) setPinError('');
                 }}
-                placeholder="Enter PIN (8892)"
+                placeholder="Enter Password"
                 autoFocus
-                className="w-full px-4 py-3 rounded-2xl border border-slate-300 bg-slate-50 text-slate-900 text-center font-mono text-base font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition-all"
+                className="w-full px-4 py-3 rounded-2xl border border-slate-300 bg-slate-50 text-slate-900 text-center font-mono text-base font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition-all"
               />
               {pinError && (
                 <p className="text-xs font-semibold text-rose-500 mt-1">
@@ -192,7 +192,7 @@ export const AdminApprovalView: React.FC = () => {
               type="submit"
               className="w-full py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm uppercase tracking-wider shadow-md transition-all cursor-pointer active:scale-98"
             >
-              Unlock Admin Portal
+              Unlock Portal
             </button>
 
             <button
@@ -200,13 +200,9 @@ export const AdminApprovalView: React.FC = () => {
               onClick={handleExitAdmin}
               className="w-full py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
             >
-              Back to Profile
+              Back
             </button>
           </form>
-
-          <p className="text-[11px] text-slate-400 pt-1">
-            Default Security PIN: <strong className="text-slate-700 font-mono">8892</strong>
-          </p>
         </div>
       </div>
     );
