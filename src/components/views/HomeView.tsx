@@ -555,37 +555,43 @@ export const HomeView: React.FC = () => {
         </div>
       </section>
 
-      {/* Shifted to Home Section Last Bottom: Winning ON/OFF Toggle & Admin Portal Button */}
+      {/* Shifted to Home Section Last Bottom: Winning ON/OFF Toggle & Admin Portal Button labeled Volume */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 pb-6">
         <div className="flex flex-col items-center justify-center gap-3">
-          {/* Winning ON/OFF Switch */}
-          <button
-            type="button"
-            onClick={handleToggleClick}
-            className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-xs ${
-              winManagerEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-            }`}
-            title={winManagerEnabled ? 'Winning ON' : 'Winning OFF'}
-            aria-label={winManagerEnabled ? 'ON' : 'OFF'}
-          >
-            <span
-              className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out flex items-center justify-center text-[9px] font-black uppercase ${
-                winManagerEnabled ? 'translate-x-7 text-emerald-600' : 'translate-x-0 text-slate-500'
-              }`}
-            >
-              {winManagerEnabled ? 'ON' : 'OFF'}
+          {/* ON/OFF Switch labeled Volume */}
+          <div className="flex items-center gap-2.5">
+            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+              Volume
             </span>
-          </button>
+            <button
+              type="button"
+              onClick={handleToggleClick}
+              className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-xs ${
+                winManagerEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+              }`}
+              title={winManagerEnabled ? 'Volume ON' : 'Volume OFF'}
+              aria-label={winManagerEnabled ? 'Volume ON' : 'Volume OFF'}
+            >
+              <span
+                className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out flex items-center justify-center text-[9px] font-black uppercase ${
+                  winManagerEnabled ? 'translate-x-7 text-emerald-600' : 'translate-x-0 text-slate-500'
+                }`}
+              >
+                {winManagerEnabled ? 'ON' : 'OFF'}
+              </span>
+            </button>
+          </div>
 
-          {/* Crown-only Portal Button */}
+          {/* Crown Portal Button labeled Volume */}
           <div className="flex items-center justify-center">
             <button
               type="button"
               onClick={handleAdminClick}
-              className="relative inline-flex items-center justify-center w-9 h-9 rounded-full bg-slate-100 hover:bg-amber-50 text-amber-500 border border-slate-200 transition-all shadow-2xs cursor-pointer active:scale-95"
-              aria-label="Portal Access"
+              className="relative inline-flex items-center justify-center gap-1.5 px-3.5 h-9 rounded-full bg-slate-100 hover:bg-amber-50 text-slate-700 border border-slate-200 transition-all shadow-2xs cursor-pointer active:scale-95"
+              aria-label="Volume"
             >
               <Crown className="w-4 h-4 text-amber-500" />
+              <span className="text-xs font-bold uppercase tracking-wider">Volume</span>
               {masterDepositRequests.filter((d) => d.status === 'Pending').length > 0 && (
                 <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-rose-600 animate-pulse border border-white" />
               )}

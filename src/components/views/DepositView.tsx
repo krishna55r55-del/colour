@@ -92,9 +92,22 @@ export const DepositView: React.FC = () => {
     setSelectedAmount(parseInt(val, 10) || 0);
   };
 
+  const OFFICIAL_UPI_ID = '7841812365@nyes';
+
   const handleCopyUpi = () => {
     playSound('click');
-    navigator.clipboard?.writeText('cobclub.pay@upi');
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(OFFICIAL_UPI_ID).catch(() => {});
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = OFFICIAL_UPI_ID;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
     setCopiedUpi(true);
     setTimeout(() => setCopiedUpi(false), 2000);
   };
@@ -317,26 +330,45 @@ export const DepositView: React.FC = () => {
             </div>
           </div>
 
-          {/* Official Merchant Payment UPI Box */}
-          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-3">
+          {/* Official Merchant Payment UPI & QR Box */}
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <label className="text-xs font-extrabold text-slate-700 uppercase tracking-wider block">
-                Official Merchant Payment UPI
+                Official Merchant Payment UPI &amp; QR
               </label>
               <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                Live & Verified
+                Live &amp; Verified
               </span>
             </div>
 
+            {/* Scannable UPI QR Code */}
+            <div className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 border border-slate-200">
+              <div
+                onClick={() => setLightboxImage('/assets/aistudio/cobclub_upi_qr_b5e37b20.png')}
+                className="w-56 sm:w-64 rounded-2xl bg-white p-2 border border-slate-200 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+                title="Click to enlarge QR Code"
+              >
+                <img
+                  src="/assets/aistudio/cobclub_upi_qr_b5e37b20.png"
+                  alt="COBCLUB Official UPI QR Code - 7841812365@nyes"
+                  className="w-full h-auto rounded-xl object-contain"
+                />
+              </div>
+              <span className="text-[11px] text-slate-500 font-medium mt-2.5 text-center">
+                Scan QR with PhonePe, Google Pay, Paytm or any UPI App (Tap QR to enlarge)
+              </span>
+            </div>
+
+            {/* Copyable UPI ID */}
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center font-black text-xs shadow-xs">
+                <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center font-black text-xs shadow-xs shrink-0">
                   UPI
                 </div>
                 <div>
                   <span className="text-[11px] text-slate-400 block font-medium">Merchant UPI VPA</span>
                   <span className="text-sm sm:text-base font-bold font-mono text-slate-900 select-all">
-                    cobclub.pay@upi
+                    {OFFICIAL_UPI_ID}
                   </span>
                 </div>
               </div>
