@@ -52,6 +52,7 @@ export const AuthPage: React.FC = () => {
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
   const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
   const [showForgotConfirmPassword, setShowForgotConfirmPassword] = useState(false);
+  const [otpSentCode, setOtpSentCode] = useState<string | null>(null);
   const [otpTimer, setOtpTimer] = useState(0);
   const [otpSuccessMessage, setOtpSuccessMessage] = useState<string | null>(null);
   const [isSendingOtp, setIsSendingOtp] = useState(false);
@@ -69,31 +70,25 @@ export const AuthPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [otpTimer]);
 
-  const handleSignIn = async (e: React.FormEvent) => {
+  const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isLoading) return;
     setErrorMessage(null);
     setOtpSuccessMessage(null);
     playSound('click');
 
     setIsLoading(true);
-    try {
-      const res = await login(signInNumber, signInPassword);
+    setTimeout(() => {
+      const res = login(signInNumber, signInPassword);
+      setIsLoading(false);
       if (!res.success) {
         setErrorMessage(res.error || 'Failed to sign in. Please check your credentials.');
         playSound('loss');
       }
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'Unable to connect to server. Please try again.');
-      playSound('loss');
-    } finally {
-      setIsLoading(false);
-    }
+    }, 400);
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
+  const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isLoading) return;
     setErrorMessage(null);
     setOtpSuccessMessage(null);
     playSound('click');
@@ -104,51 +99,39 @@ export const AuthPage: React.FC = () => {
     }
 
     setIsLoading(true);
-    try {
-      const res = await register(regNumber, regPassword, regConfirmPassword, regInviteCode);
+    setTimeout(() => {
+      const res = register(regNumber, regPassword, regConfirmPassword, regInviteCode);
+      setIsLoading(false);
       if (!res.success) {
         setErrorMessage(res.error || 'Registration failed.');
         playSound('loss');
       }
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'Unable to connect to server. Please try again.');
-      playSound('loss');
-    } finally {
-      setIsLoading(false);
-    }
+    }, 500);
   };
 
-  const handleSendOtp = async () => {
-    if (isSendingOtp) return;
+  const handleSendOtp = () => {
     setErrorMessage(null);
     setOtpSuccessMessage(null);
     playSound('click');
 
     setIsSendingOtp(true);
-    try {
-      const res = await sendPasswordResetOtp(forgotNumber);
+    setTimeout(() => {
+      setIsSendingOtp(false);
+      const res = sendPasswordResetOtp(forgotNumber);
       if (!res.success) {
-        setErrorMessage(res.error || 'Failed to send SMS OTP.');
+        setErrorMessage(res.error || 'Failed to send OTP.');
         playSound('loss');
       } else {
+        setOtpSentCode(res.otp || null);
         setOtpTimer(60);
-        setOtpSuccessMessage(
-          res.message ||
-            `SMS verification OTP sent to +91 ${forgotNumber.replace(/\D/g, '')}. Please check your messages.`
-        );
+        setOtpSuccessMessage(`OTP sent successfully to +91 ${forgotNumber.replace(/\D/g, '')}!`);
         playSound('win');
       }
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'Unable to send SMS OTP. Please try again.');
-      playSound('loss');
-    } finally {
-      setIsSendingOtp(false);
-    }
+    }, 350);
   };
 
-  const handleResetPassword = async (e: React.FormEvent) => {
+  const handleResetPassword = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isLoading) return;
     setErrorMessage(null);
     playSound('click');
 
@@ -171,13 +154,9 @@ export const AuthPage: React.FC = () => {
     }
 
     setIsLoading(true);
-    try {
-      const res = await resetPasswordWithOtp(
-        forgotNumber,
-        forgotOtp,
-        forgotNewPassword,
-        forgotConfirmPassword
-      );
+    setTimeout(() => {
+      setIsLoading(false);
+      const res = resetPasswordWithOtp(forgotNumber, forgotOtp, forgotNewPassword, forgotConfirmPassword);
       if (!res.success) {
         setErrorMessage(res.error || 'Failed to reset password.');
         playSound('loss');
@@ -185,20 +164,14 @@ export const AuthPage: React.FC = () => {
         setSignInNumber(forgotNumber.trim().replace(/\D/g, ''));
         setSignInPassword(forgotNewPassword);
         setActiveTab('signin');
+        setOtpSentCode(null);
         setForgotOtp('');
         setForgotNewPassword('');
         setForgotConfirmPassword('');
-        setOtpSuccessMessage(
-          'Password reset successfully! You can now sign in with your new password.'
-        );
+        setOtpSuccessMessage('Password reset successfully! You can now sign in with your new password.');
         playSound('jackpot');
       }
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'Unable to reset password. Please try again.');
-      playSound('loss');
-    } finally {
-      setIsLoading(false);
-    }
+    }, 450);
   };
 
   return (
@@ -304,24 +277,7 @@ export const AuthPage: React.FC = () => {
           {errorMessage && (
             <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium flex items-start gap-2 animate-in fade-in duration-200">
               <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-              <div className="flex-1 space-y-1.5">
-                <span className="block">{errorMessage}</span>
-                {activeTab === 'signin' && errorMessage.toLowerCase().includes('please register') && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      playSound('click');
-                      setRegNumber(signInNumber);
-                      setActiveTab('register');
-                      setErrorMessage(null);
-                    }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] cursor-pointer transition-colors"
-                  >
-                    <span>Create Account Now</span>
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
+              <span>{errorMessage}</span>
             </div>
           )}
 
@@ -598,7 +554,32 @@ export const AuthPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Real SMS OTP Input Notice */}
+              {/* OTP Simulation Notification Badge */}
+              {otpSentCode && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center justify-between gap-2 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2">
+                    <Key className="w-4 h-4 text-amber-600 shrink-0" />
+                    <div>
+                      <span className="font-bold block">Verification OTP:</span>
+                      <span className="font-mono font-black text-sm tracking-widest text-amber-800">
+                        {otpSentCode}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setForgotOtp(otpSentCode);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-amber-200 hover:bg-amber-300 text-amber-900 font-bold text-[11px] transition-colors cursor-pointer"
+                  >
+                    Autofill OTP
+                  </button>
+                </div>
+              )}
+
+              {/* OTP Code Input */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                   6-Digit OTP Code

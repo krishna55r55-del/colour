@@ -16,7 +16,6 @@ export const DailyBonusModal: React.FC = () => {
   const {
     dailyBonus,
     claimDailyBonus,
-    isClaimingDailyBonus,
     canClaimDailyBonus,
     timeUntilNextBonus,
     isDailyBonusModalOpen,
@@ -66,11 +65,10 @@ export const DailyBonusModal: React.FC = () => {
 
   const nextRewardTier = DAILY_BONUS_TIERS.find((t) => t.day === nextTargetDay) || DAILY_BONUS_TIERS[0];
 
-  const handleClaim = async () => {
-    if (isClaimingDailyBonus || !canClaimDailyBonus) return;
+  const handleClaim = () => {
     playSound('click');
     setErrorMessage(null);
-    const result = await claimDailyBonus();
+    const result = claimDailyBonus();
     if (result.success) {
       setClaimSuccess({ amount: result.amount, day: result.day });
       setTimeout(() => {
@@ -156,9 +154,7 @@ export const DailyBonusModal: React.FC = () => {
 
             <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
               {DAILY_BONUS_TIERS.map((tier) => {
-                const isClaimed = canClaimDailyBonus
-                  ? nextTargetDay > 1 && tier.day < nextTargetDay
-                  : tier.day <= currentStreak;
+                const isClaimed = tier.day <= currentStreak && !canClaimDailyBonus;
                 const isCurrentReady = canClaimDailyBonus && tier.day === nextTargetDay;
                 const isVip = tier.day === 7;
 
@@ -240,13 +236,12 @@ export const DailyBonusModal: React.FC = () => {
 
                 <button
                   type="button"
-                  disabled={isClaimingDailyBonus || !canClaimDailyBonus}
                   onClick={handleClaim}
-                  className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-rose-600 to-amber-500 hover:from-rose-500 hover:to-amber-400 text-white font-black text-xs uppercase tracking-wider shadow-md hover:shadow-lg transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-rose-600 to-amber-500 hover:from-rose-500 hover:to-amber-400 text-white font-black text-xs uppercase tracking-wider shadow-md hover:shadow-lg transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
                 >
                   <Gift className="w-4 h-4" />
-                  <span>{isClaimingDailyBonus ? 'Claiming...' : 'Claim Now'}</span>
-                  {!isClaimingDailyBonus && <ArrowRight className="w-4 h-4" />}
+                  <span>Claim Now</span>
+                  <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             ) : (
@@ -268,45 +263,11 @@ export const DailyBonusModal: React.FC = () => {
             )}
           </div>
 
-          {/* Bonus Transaction History */}
-          {dailyBonus.history && dailyBonus.history.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Bonus Transaction History
-                </span>
-                <span className="text-[11px] font-bold text-slate-400">
-                  {dailyBonus.history.length} Claim{dailyBonus.history.length === 1 ? '' : 's'}
-                </span>
-              </div>
-              <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
-                {dailyBonus.history.map((rec) => (
-                  <div
-                    key={rec.id}
-                    className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 border border-slate-200/80 text-xs"
-                  >
-                    <div className="min-w-0">
-                      <span className="font-bold text-slate-800 block">
-                        Day {rec.day} Daily Bonus
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        {rec.id} · {new Date(rec.claimedAt).toLocaleString()}
-                      </span>
-                    </div>
-                    <span className="font-mono font-black text-emerald-600 shrink-0 ml-2">
-                      +₹{rec.amount}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Info note */}
           <div className="flex items-center gap-2 text-[11px] text-slate-500 pt-1">
             <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>
-              Bonuses reset once every 24 hours. Claims are permanently verified and saved in the database.
+              Bonuses reset once every 24 hours. Points are saved to your profile and cloud database.
             </span>
           </div>
         </div>

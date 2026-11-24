@@ -63,7 +63,6 @@ export const WithdrawView: React.FC = () => {
   const [upiId, setUpiId] = useState<string>(savedBankDetails?.upiId || '');
   const [bankFormError, setBankFormError] = useState<string>('');
   const [bankSavedToast, setBankSavedToast] = useState<boolean>(false);
-  const [isSavingBank, setIsSavingBank] = useState<boolean>(false);
 
   // Withdrawal Amount State
   const [withdrawAmount, setWithdrawAmount] = useState<number>(500);
@@ -114,9 +113,8 @@ export const WithdrawView: React.FC = () => {
     setWithdrawError('');
   };
 
-  const handleSaveBankForm = async (e?: React.FormEvent) => {
+  const handleSaveBankForm = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (isSavingBank) return;
     setBankFormError('');
 
     if (!accountHolderName.trim()) {
@@ -149,24 +147,13 @@ export const WithdrawView: React.FC = () => {
       phoneNumber: user?.phoneNumber,
     };
 
-    setIsSavingBank(true);
-    try {
-      const res = await saveBankDetails(details);
-      if (!res.success) {
-        setBankFormError(res.error || 'Failed to save bank account details.');
-        playSound('loss');
-        return;
-      }
-      setIsEditingBank(false);
-      setBankSavedToast(true);
-      setTimeout(() => setBankSavedToast(false), 3000);
-    } finally {
-      setIsSavingBank(false);
-    }
+    saveBankDetails(details);
+    setIsEditingBank(false);
+    setBankSavedToast(true);
+    setTimeout(() => setBankSavedToast(false), 3000);
   };
 
-  const handleConfirmWithdrawal = async () => {
-    if (isSubmitting) return;
+  const handleConfirmWithdrawal = () => {
     setWithdrawError('');
 
     // Ensure bank details exist
@@ -200,8 +187,10 @@ export const WithdrawView: React.FC = () => {
     setIsSubmitting(true);
     playSound('click');
 
-    try {
-      const res = await submitWithdrawal(withdrawAmount, currentBank);
+    setTimeout(() => {
+      const res = submitWithdrawal(withdrawAmount, currentBank);
+      setIsSubmitting(false);
+
       if (res.success && res.record) {
         setSuccessModal({
           isOpen: true,
@@ -212,11 +201,8 @@ export const WithdrawView: React.FC = () => {
         });
       } else {
         setWithdrawError(res.error || 'Failed to submit withdrawal request.');
-        playSound('loss');
       }
-    } finally {
-      setIsSubmitting(false);
-    }
+    }, 1000);
   };
 
   return (
@@ -489,10 +475,9 @@ export const WithdrawView: React.FC = () => {
                 <div className="flex items-center gap-2 pt-1">
                   <button
                     type="submit"
-                    disabled={isSavingBank}
-                    className="flex-1 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                    className="flex-1 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-xs"
                   >
-                    {isSavingBank ? 'Saving...' : 'Save Bank Details'}
+                    Save Bank Details
                   </button>
 
                   {savedBankDetails && (

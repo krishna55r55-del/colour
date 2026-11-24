@@ -1,12 +1,4 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useRef,
-  useMemo,
-  useCallback,
-} from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
 import {
   GameId,
   GameHistoryItem,
@@ -16,28 +8,54 @@ import {
   BankAccountDetails,
   WithdrawRecord,
   DepositRecord,
+  SupabaseSyncStatus,
   DailyBonusState,
+  DailyBonusRecord,
+  PlayerBetRecord,
   WinGoBetOrderInput,
   ReferralRecord,
   ReferralMilestoneBonus,
   ReferralStats,
 } from '../types';
 import { soundManager } from '../utils/audio';
-import { parsePeriodToTimestamp, getPeriodForTime } from '../utils/winLogic';
 import {
-  api,
-  setAuthToken,
-  setAdminToken,
-  hasAdminToken,
-  AccountStatePayload,
-  WinGoRoundItem,
-  PaginatedBetsResponse,
-} from '../lib/api';
+  syncUserProfile,
+  updateWalletBalanceInSupabase,
+  recordBetInSupabase,
+  updateBetOutcomeInSupabase,
+  recordGameRoundInSupabase,
+  fetchBetHistoryFromSupabase,
+  fetchAllPlayerBetsFromSupabase,
+  recordDepositInSupabase,
+  fetchDepositsFromSupabase,
+  fetchAllDepositsFromSupabase,
+  updateDepositStatusInSupabase,
+  recordWithdrawalInSupabase,
+  fetchWithdrawalsFromSupabase,
+  saveBankDetailsToSupabase,
+  fetchBankDetailsFromSupabase,
+  recordDailyBonusInSupabase,
+  testSupabaseConnection,
+} from '../lib/supabase';
+import {
+  parsePeriodToTimestamp,
+  getFinalizedRound,
+  getDeterministicNumberForRound,
+  determineWinGoOutcome,
+  evaluateWinGoBet,
+} from '../utils/winLogic';
+
+interface StoredAccount {
+  phoneNumber: string;
+  passwordHash: string;
+  memberId: string;
+  registeredAt: number;
+  referredBy?: string;
+}
 
 interface GameContextType {
   balance: number;
   history: GameHistoryItem[];
-  totalBetsCount: number;
   stats: UserStats;
   recentlyPlayed: GameId[];
   soundEnabled: boolean;
@@ -45,100 +63,68 @@ interface GameContextType {
   selectedGameId: GameId | null;
   user: UserProfile | null;
   isAuthenticated: boolean;
-  isAuthLoading: boolean;
   savedBankDetails: BankAccountDetails | null;
   withdrawRecords: WithdrawRecord[];
   depositRecords: DepositRecord[];
-  refreshAccountState: () => Promise<void>;
-  fetchPaginatedBets: (params: {
-    page?: number;
-    limit?: number;
-    gameId?: string;
-    outcome?: 'all' | 'wins' | 'losses';
-    status?: 'all' | 'Completed' | 'Pending';
-  }) => Promise<PaginatedBetsResponse>;
-  login: (phoneNumber: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  supabaseStatus: SupabaseSyncStatus;
+  refreshFromSupabase: () => Promise<void>;
+  login: (phoneNumber: string, password: string) => { success: boolean; error?: string };
   register: (
     phoneNumber: string,
     password: string,
     confirmPassword: string,
     inviteCode?: string
-  ) => Promise<{ success: boolean; error?: string }>;
-  sendPasswordResetOtp: (
-    phoneNumber: string
-  ) => Promise<{ success: boolean; message?: string; error?: string }>;
+  ) => { success: boolean; error?: string };
+  sendPasswordResetOtp: (phoneNumber: string) => { success: boolean; otp?: string; error?: string };
   resetPasswordWithOtp: (
     phoneNumber: string,
     otp: string,
     newPassword: string,
     confirmPassword: string
-  ) => Promise<{ success: boolean; error?: string }>;
-  logout: () => Promise<void>;
+  ) => { success: boolean; error?: string };
+  logout: () => void;
   toggleSound: () => void;
   setActiveView: (view: ViewType) => void;
   selectGame: (id: GameId | null) => void;
   placeBet: (amount: number) => boolean;
   refundBet: (amount: number) => void;
-  submitWinGoBet: (
-    order: WinGoBetOrderInput
-  ) => Promise<{ success: boolean; bet?: GameHistoryItem; betId?: string; error?: string }>;
+  submitWinGoBet: (order: WinGoBetOrderInput) => { success: boolean; betId?: string; error?: string };
   pendingWinGoBets: GameHistoryItem[];
-  settleWinGoBets: () => Promise<{
-    settledBets: GameHistoryItem[];
-    historiesByDuration?: Record<number, WinGoRoundItem[]>;
-    currentPeriods?: Record<number, string>;
-    serverTimeMs?: number;
-  }>;
-  wingoRoundsByDuration: Record<number, WinGoRoundItem[]>;
-  wingoCurrentPeriods: Record<number, string>;
-  serverClockOffsetMs: number;
-  refreshWinGoState: () => Promise<void>;
-  recordGameResult: (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => Promise<void>;
+  settleWinGoBets: (forcedOutcomes?: Record<string, number>) => Promise<void>;
+  settledRoundOutcomes: Record<string, number>;
+  recordSettledRoundOutcome: (duration: number, period: string, drawnNumber: number) => void;
+  recordGameResult: (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => void;
+  deposit: (amount: number, bonus?: number, method?: string) => DepositRecord;
   submitDepositRequest: (data: {
     amount: number;
     bonus: number;
     method: string;
     utr: string;
     screenshot?: string;
-  }) => Promise<{ success: boolean; record?: DepositRecord; error?: string }>;
-  isAdminUnlocked: boolean;
-  unlockAdmin: (passcode: string) => Promise<{ success: boolean; error?: string }>;
-  exitAdmin: () => void;
-  approveDepositRequest: (depositId: string) => Promise<{ success: boolean; error?: string }>;
-  rejectDepositRequest: (
-    depositId: string,
-    reason?: string
-  ) => Promise<{ success: boolean; error?: string }>;
+  }) => DepositRecord;
+  approveDepositRequest: (depositId: string) => { success: boolean; error?: string };
+  rejectDepositRequest: (depositId: string, reason?: string) => { success: boolean };
   masterDepositRequests: DepositRecord[];
   refreshMasterDeposits: () => Promise<void>;
-  saveBankDetails: (details: BankAccountDetails) => Promise<{ success: boolean; error?: string }>;
-  submitWithdrawal: (
-    amount: number,
-    details: BankAccountDetails
-  ) => Promise<{ success: boolean; error?: string; record?: WithdrawRecord }>;
+  saveBankDetails: (details: BankAccountDetails) => void;
+  submitWithdrawal: (amount: number, details: BankAccountDetails) => { success: boolean; error?: string; record?: WithdrawRecord };
   winManagerEnabled: boolean;
+  toggleWinManager: () => void;
   setWinManagerEnabled: (enabled: boolean) => void;
+  resetBalance: () => void;
+  clearHistory: () => void;
   playSound: (
-    type:
-      | 'click'
-      | 'bet'
-      | 'tick'
-      | 'card'
-      | 'flip'
-      | 'win'
-      | 'jackpot'
-      | 'loss'
-      | 'countdown_beep'
-      | 'round_end',
+    type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss' | 'countdown_beep' | 'round_end',
     arg?: number
   ) => void;
   dailyBonus: DailyBonusState;
-  claimDailyBonus: () => Promise<{ success: boolean; amount: number; day: number; error?: string }>;
-  isClaimingDailyBonus: boolean;
+  claimDailyBonus: () => { success: boolean; amount: number; day: number; error?: string };
   canClaimDailyBonus: boolean;
   timeUntilNextBonus: number;
   isDailyBonusModalOpen: boolean;
   setIsDailyBonusModalOpen: (open: boolean) => void;
+  masterPlayerBets: PlayerBetRecord[];
+  refreshMasterPlayerBets: () => Promise<void>;
   hasCompletedFirstDeposit: boolean;
   showFirstDepositPrompt: boolean;
   setShowFirstDepositPrompt: (open: boolean) => void;
@@ -158,12 +144,22 @@ export const DAILY_BONUS_TIERS = [
   { day: 7, points: 500, label: 'Day 7 VIP' },
 ];
 
+// Global storage keys
+const STORAGE_KEY_AUTH = 'cobclub_auth_user_v1';
+const STORAGE_KEY_ACCOUNTS = 'cobclub_registered_accounts_v1';
+const STORAGE_KEY_WIN_MANAGER = 'cobclub_win_manager_v1';
 const STORAGE_KEY_SOUND = 'cobclub_sound_pref_v1';
 const STORAGE_KEY_RECENT = 'cobclub_recent_games_v1';
+const STORAGE_KEY_MASTER_PLAYER_BETS = 'cobclub_master_player_records_v1';
+const STORAGE_KEY_MASTER_DEPOSITS = 'cobclub_master_deposits_v1';
+const STORAGE_KEY_REFERRALS = 'cobclub_referrals_v1';
+const STORAGE_KEY_REFERRAL_BONUSES = 'cobclub_referral_bonuses_v1';
+const STORAGE_KEY_ROUND_OUTCOMES = 'cobclub_wingo_round_outcomes_v1';
 
 export const REFERRAL_REWARD_AMOUNT = 77;
 export const REFERRAL_MILESTONE_TARGET = 5;
 export const REFERRAL_MILESTONE_BONUS = 355;
+
 export const BONUS_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 export const defaultDailyBonus: DailyBonusState = {
@@ -173,6 +169,10 @@ export const defaultDailyBonus: DailyBonusState = {
   history: [],
 };
 
+// User-scoped storage key helper
+const getUserKey = (phone: string, key: string) => `cobclub_${key}_${phone}`;
+
+// Initial balance for new registers: strictly 98 rupees bonus money
 const INITIAL_BALANCE = 98;
 
 const defaultStats: UserStats = {
@@ -187,46 +187,145 @@ const defaultStats: UserStats = {
   favoriteGameId: null,
 };
 
+const defaultAccounts: StoredAccount[] = [
+  {
+    phoneNumber: '9876543210',
+    passwordHash: 'password123',
+    memberId: 'COB8892',
+    registeredAt: Date.now() - 86400000,
+  },
+];
+
+const defaultUserProfile: UserProfile = {
+  phoneNumber: '9876543210',
+  memberId: 'COB8892',
+  registeredAt: Date.now() - 86400000,
+};
+
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
-  const [balance, setBalance] = useState<number>(INITIAL_BALANCE);
-  const [hasCompletedFirstDeposit, setHasCompletedFirstDeposit] = useState<boolean>(false);
-  const [history, setHistory] = useState<GameHistoryItem[]>([]);
-  const [totalBetsCount, setTotalBetsCount] = useState<number>(0);
-  const [stats, setStats] = useState<UserStats>(defaultStats);
-  const [savedBankDetails, setSavedBankDetails] = useState<BankAccountDetails | null>(null);
-  const [withdrawRecords, setWithdrawRecords] = useState<WithdrawRecord[]>([]);
-  const [depositRecords, setDepositRecords] = useState<DepositRecord[]>([]);
-  const [dailyBonus, setDailyBonus] = useState<DailyBonusState>(defaultDailyBonus);
-  const [canClaimDailyBonus, setCanClaimDailyBonus] = useState<boolean>(true);
-  const [timeUntilNextBonus, setTimeUntilNextBonus] = useState<number>(0);
-  const [isClaimingDailyBonus, setIsClaimingDailyBonus] = useState<boolean>(false);
-  const [isDailyBonusModalOpen, setIsDailyBonusModalOpen] = useState<boolean>(false);
-  const [userReferrals, setUserReferrals] = useState<ReferralRecord[]>([]);
-  const [userReferralBonuses, setUserReferralBonuses] = useState<ReferralMilestoneBonus[]>([]);
-
-  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(() => hasAdminToken());
-  const [masterDepositRequests, setMasterDepositRequests] = useState<DepositRecord[]>([]);
-
-  const [wingoRoundsByDuration, setWingoRoundsByDuration] = useState<
-    Record<number, WinGoRoundItem[]>
-  >({
-    30: [],
-    60: [],
-    180: [],
-    300: [],
+  // Registered accounts database
+  const [accounts, setAccounts] = useState<StoredAccount[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
+      return saved ? JSON.parse(saved) : defaultAccounts;
+    } catch {
+      return defaultAccounts;
+    }
   });
-  const [wingoCurrentPeriods, setWingoCurrentPeriods] = useState<Record<number, string>>(() => ({
-    30: getPeriodForTime(Date.now(), 30),
-    60: getPeriodForTime(Date.now(), 60),
-    180: getPeriodForTime(Date.now(), 180),
-    300: getPeriodForTime(Date.now(), 300),
-  }));
-  const [serverClockOffsetMs, setServerClockOffsetMs] = useState<number>(0);
-  const serverClockOffsetRef = useRef<number>(0);
+
+  // Current logged in user: strictly null by default (no automatic default login)
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_AUTH);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Helper to load user-specific initial data
+  const loadUserInitialData = (phone: string | undefined) => {
+    if (!phone) {
+      return {
+        balance: INITIAL_BALANCE,
+        history: [],
+        stats: defaultStats,
+        bank: null,
+        withdraws: [],
+        deposits: [],
+        dailyBonus: defaultDailyBonus,
+      };
+    }
+    try {
+      const savedBal = localStorage.getItem(getUserKey(phone, 'balance'));
+      const balance = savedBal !== null ? Math.max(0, parseInt(savedBal, 10)) : INITIAL_BALANCE;
+
+      const savedHist = localStorage.getItem(getUserKey(phone, 'history'));
+      const history = savedHist ? JSON.parse(savedHist) : [];
+
+      const savedSt = localStorage.getItem(getUserKey(phone, 'stats'));
+      const stats = savedSt ? JSON.parse(savedSt) : defaultStats;
+
+      const savedB = localStorage.getItem(getUserKey(phone, 'bank'));
+      const bank = savedB ? JSON.parse(savedB) : null;
+
+      const savedW = localStorage.getItem(getUserKey(phone, 'withdraws'));
+      const withdraws = savedW ? JSON.parse(savedW) : [];
+
+      const savedD = localStorage.getItem(getUserKey(phone, 'deposits'));
+      const deposits = savedD ? JSON.parse(savedD) : [];
+
+      const savedBonus = localStorage.getItem(getUserKey(phone, 'daily_bonus'));
+      const dailyBonus: DailyBonusState = savedBonus ? JSON.parse(savedBonus) : defaultDailyBonus;
+
+      return { balance, history, stats, bank, withdraws, deposits, dailyBonus };
+    } catch {
+      return {
+        balance: INITIAL_BALANCE,
+        history: [],
+        stats: defaultStats,
+        bank: null,
+        withdraws: [],
+        deposits: [],
+        dailyBonus: defaultDailyBonus,
+      };
+    }
+  };
+
+  const initialData = loadUserInitialData(user?.phoneNumber);
+
+  const [balance, setBalance] = useState<number>(initialData.balance);
+  const [history, setHistory] = useState<GameHistoryItem[]>(initialData.history);
+  const [stats, setStats] = useState<UserStats>(initialData.stats);
+  const [savedBankDetails, setSavedBankDetails] = useState<BankAccountDetails | null>(initialData.bank);
+  const [withdrawRecords, setWithdrawRecords] = useState<WithdrawRecord[]>(initialData.withdraws);
+  const [depositRecords, setDepositRecords] = useState<DepositRecord[]>(initialData.deposits);
+  const [dailyBonus, setDailyBonus] = useState<DailyBonusState>(initialData.dailyBonus || defaultDailyBonus);
+  const [isDailyBonusModalOpen, setIsDailyBonusModalOpen] = useState<boolean>(false);
+  const [masterPlayerBets, setMasterPlayerBets] = useState<PlayerBetRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_MASTER_PLAYER_BETS);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [masterDepositRequests, setMasterDepositRequests] = useState<DepositRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_MASTER_DEPOSITS);
+      if (saved) return JSON.parse(saved);
+      return [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [referrals, setReferrals] = useState<ReferralRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_REFERRALS);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [referralMilestoneBonuses, setReferralMilestoneBonuses] = useState<ReferralMilestoneBonus[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_REFERRAL_BONUSES);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const referralsRef = useRef(referrals);
+  referralsRef.current = referrals;
+
+  const referralMilestoneBonusesRef = useRef(referralMilestoneBonuses);
+  referralMilestoneBonusesRef.current = referralMilestoneBonuses;
 
   const [recentlyPlayed, setRecentlyPlayed] = useState<GameId[]>(() => {
     try {
@@ -248,51 +347,368 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [activeView, setActiveView] = useState<ViewType>('home');
   const [selectedGameId, setSelectedGameId] = useState<GameId | null>(null);
+
+  // First deposit requirement state: Player starts with ₹98 bonus money and must complete 1st deposit to unlock play
   const [showFirstDepositPrompt, setShowFirstDepositPrompt] = useState<boolean>(false);
   const [firstDepositPromptMessage, setFirstDepositPromptMessage] = useState<string>(
     'Deposit 1 time to play with bonus money'
   );
+
+  const hasCompletedFirstDeposit = useMemo(() => {
+    if (!user?.phoneNumber) return false;
+    const phone = user.phoneNumber;
+    const hasCompletedRecord = depositRecords.some((d) => d.status === 'Completed');
+    if (hasCompletedRecord) return true;
+    try {
+      const persistentFlag = localStorage.getItem(getUserKey(phone, 'has_deposited'));
+      return persistentFlag === 'true';
+    } catch {
+      return false;
+    }
+  }, [user?.phoneNumber, depositRecords]);
+
+  // Win Manager state: strictly defaults to OFF (false) as requested ("Winning button default off Rahe")
   const [winManagerEnabled, setWinManagerEnabled] = useState<boolean>(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_WIN_MANAGER, winManagerEnabled ? 'true' : 'false');
+    } catch {}
+  }, [winManagerEnabled]);
+
+  // Supabase live connection state
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseSyncStatus>({
+    connected: true,
+    tablesReady: false,
+    projectRef: 'ijjzajfgdlpzbvxmypya',
+    missingTables: [],
+    lastSyncedAt: null,
+  });
 
   const userRef = useRef(user);
   userRef.current = user;
+
   const balanceRef = useRef(balance);
   balanceRef.current = balance;
+
   const historyRef = useRef(history);
   historyRef.current = history;
+
+  const winManagerEnabledRef = useRef(winManagerEnabled);
+  winManagerEnabledRef.current = winManagerEnabled;
+
   const soundEnabledRef = useRef(soundEnabled);
   soundEnabledRef.current = soundEnabled;
-  const isClaimingRef = useRef(false);
-  const isSettlingRef = useRef(false);
 
-  const playSound = useCallback(
-    (
-      type:
-        | 'click'
-        | 'bet'
-        | 'tick'
-        | 'card'
-        | 'flip'
-        | 'win'
-        | 'jackpot'
-        | 'loss'
-        | 'countdown_beep'
-        | 'round_end',
-      arg?: number
-    ) => {
-      if (soundEnabledRef.current) {
-        soundManager.play(type, arg);
-      }
-    },
-    []
-  );
+  const [settledRoundOutcomes, setSettledRoundOutcomes] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_ROUND_OUTCOMES);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const settledRoundOutcomesRef = useRef<Record<string, number>>(settledRoundOutcomes);
+  settledRoundOutcomesRef.current = settledRoundOutcomes;
 
-  const toggleSound = () => {
-    const next = !soundEnabledRef.current;
-    soundEnabledRef.current = next;
-    setSoundEnabled(next);
-    if (next) soundManager.play('click');
+  const recordSettledRoundOutcome = (duration: number, period: string, drawnNumber: number) => {
+    const key = `${duration}_${period}`;
+    if (settledRoundOutcomesRef.current[key] === drawnNumber) return;
+    const next = { ...settledRoundOutcomesRef.current, [key]: drawnNumber };
+    const keys = Object.keys(next);
+    if (keys.length > 200) {
+      keys.slice(0, keys.length - 200).forEach((k) => delete next[k]);
+    }
+    settledRoundOutcomesRef.current = next;
+    setSettledRoundOutcomes(next);
+    try {
+      localStorage.setItem(STORAGE_KEY_ROUND_OUTCOMES, JSON.stringify(next));
+    } catch {}
   };
+
+  const pendingWinGoBets = React.useMemo(() => {
+    return history.filter((h) => h.gameId === 'color-prediction' && h.status === 'Pending');
+  }, [history]);
+
+  // Sync Supabase data for the currently active logged-in user
+  const performSupabaseSync = async () => {
+    const currentUser = userRef.current;
+    try {
+      const health = await testSupabaseConnection();
+      setSupabaseStatus({
+        connected: health.connected,
+        tablesReady: health.tablesReady,
+        projectRef: health.projectRef,
+        missingTables: health.missingTables,
+        lastSyncedAt: Date.now(),
+      });
+
+      if (!currentUser) return;
+      const phone = currentUser.phoneNumber;
+      const memberId = currentUser.memberId;
+
+      // 1. Sync wallet balance with profiles table for this account
+      const profileSync = await syncUserProfile(memberId, phone, balanceRef.current);
+      if (profileSync.isSynced && profileSync.balance !== balanceRef.current) {
+        setBalance(profileRes => {
+          try {
+            localStorage.setItem(getUserKey(phone, 'balance'), profileSync.balance.toString());
+          } catch {}
+          return profileSync.balance;
+        });
+      }
+
+      // 2. Sync bet history for this account with idempotency & deduplication
+      const cloudBets = await fetchBetHistoryFromSupabase(memberId, phone);
+      if (cloudBets && cloudBets.length > 0) {
+        setHistory((prev) => {
+          const map = new Map<string, GameHistoryItem>();
+          cloudBets.forEach((b) => map.set(b.id, b));
+          // Preserve local pending bets or newer settled bets
+          prev.forEach((p) => {
+            if (!map.has(p.id)) {
+              map.set(p.id, p);
+            } else if (p.status === 'Completed' && map.get(p.id)?.status === 'Pending') {
+              map.set(p.id, p);
+            }
+          });
+          const merged = Array.from(map.values())
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 100);
+          try {
+            localStorage.setItem(getUserKey(phone, 'history'), JSON.stringify(merged.slice(0, 60)));
+          } catch {}
+          historyRef.current = merged;
+          return merged;
+        });
+
+        // Calculate and sync stats from history
+        const totalRounds = cloudBets.length;
+        const totalWins = cloudBets.filter((b) => b.isWin).length;
+        const totalLosses = totalRounds - totalWins;
+        const totalWagered = cloudBets.reduce((acc, b) => acc + b.betAmount, 0);
+        const totalWon = cloudBets.reduce((acc, b) => acc + b.payout, 0);
+        const biggestWin = Math.max(0, ...cloudBets.map((b) => b.payout));
+        const newStats: UserStats = {
+          totalRounds,
+          totalWins,
+          totalLosses,
+          totalWagered,
+          totalWon,
+          biggestWin,
+          currentStreak: 0,
+          bestStreak: 0,
+          favoriteGameId: cloudBets[0]?.gameId || null,
+        };
+        setStats(newStats);
+        try {
+          localStorage.setItem(getUserKey(phone, 'stats'), JSON.stringify(newStats));
+        } catch {}
+      }
+
+      // 3. Sync deposit records for this account
+      const cloudDeposits = await fetchDepositsFromSupabase(memberId, phone);
+      if (cloudDeposits && cloudDeposits.length > 0) {
+        const mappedDeposits: DepositRecord[] = cloudDeposits.map((d) => ({
+          id: d.id,
+          amount: d.amount,
+          bonus: d.bonus,
+          totalCredit: d.total_credit,
+          method: d.method,
+          timestamp: d.created_at ? new Date(d.created_at).getTime() : Date.now(),
+          status: d.status,
+        }));
+        setDepositRecords(mappedDeposits);
+        try {
+          localStorage.setItem(getUserKey(phone, 'deposits'), JSON.stringify(mappedDeposits));
+        } catch {}
+      }
+
+      // 4. Sync withdrawal records for this account
+      const cloudWithdrawals = await fetchWithdrawalsFromSupabase(memberId, phone);
+      if (cloudWithdrawals && cloudWithdrawals.length > 0) {
+        setWithdrawRecords(cloudWithdrawals);
+        try {
+          localStorage.setItem(getUserKey(phone, 'withdraws'), JSON.stringify(cloudWithdrawals));
+        } catch {}
+      }
+
+      // 5. Sync bank account details for this account
+      const cloudBank = await fetchBankDetailsFromSupabase(memberId, phone);
+      if (cloudBank) {
+        setSavedBankDetails(cloudBank);
+        try {
+          localStorage.setItem(getUserKey(phone, 'bank'), JSON.stringify(cloudBank));
+        } catch {}
+      }
+
+      // 6. Sync daily login bonus tracking
+      if (profileSync.isSynced) {
+        if (profileSync.lastDailyBonusAt !== undefined || profileSync.dailyStreak !== undefined) {
+          setDailyBonus((prev) => {
+            const updated: DailyBonusState = {
+              ...prev,
+              lastClaimedAt: profileSync.lastDailyBonusAt !== undefined ? profileSync.lastDailyBonusAt : prev.lastClaimedAt,
+              streak: profileSync.dailyStreak !== undefined ? profileSync.dailyStreak : prev.streak,
+              totalClaimed: profileSync.totalBonusClaimed !== undefined ? profileSync.totalBonusClaimed : prev.totalClaimed,
+            };
+            try {
+              localStorage.setItem(getUserKey(phone, 'daily_bonus'), JSON.stringify(updated));
+            } catch {}
+            return updated;
+          });
+        }
+      }
+
+      // 7. Sync master player bet records ("player bet history will save in my records")
+      await refreshMasterPlayerBets();
+    } catch (e) {
+      console.warn('Supabase sync warning:', e);
+    }
+  };
+
+  // Switch to account data when user logs in or registers
+  const switchAccount = async (targetUser: UserProfile, isNewReg: boolean = false) => {
+    const phone = targetUser.phoneNumber;
+    const memberId = targetUser.memberId;
+
+    let accBalance = INITIAL_BALANCE;
+    let accHistory: GameHistoryItem[] = [];
+    let accStats: UserStats = defaultStats;
+    let accBank: BankAccountDetails | null = null;
+    let accWithdraws: WithdrawRecord[] = [];
+    let accDeposits: DepositRecord[] = [];
+    let accDailyBonus: DailyBonusState = defaultDailyBonus;
+
+    if (!isNewReg) {
+      try {
+        const savedBal = localStorage.getItem(getUserKey(phone, 'balance'));
+        if (savedBal !== null) accBalance = Math.max(0, parseInt(savedBal, 10));
+
+        const savedHist = localStorage.getItem(getUserKey(phone, 'history'));
+        if (savedHist) accHistory = JSON.parse(savedHist);
+
+        const savedSt = localStorage.getItem(getUserKey(phone, 'stats'));
+        if (savedSt) accStats = JSON.parse(savedSt);
+
+        const savedB = localStorage.getItem(getUserKey(phone, 'bank'));
+        if (savedB) accBank = JSON.parse(savedB);
+
+        const savedW = localStorage.getItem(getUserKey(phone, 'withdraws'));
+        if (savedW) accWithdraws = JSON.parse(savedW);
+
+        const savedD = localStorage.getItem(getUserKey(phone, 'deposits'));
+        if (savedD) accDeposits = JSON.parse(savedD);
+
+        const savedBonus = localStorage.getItem(getUserKey(phone, 'daily_bonus'));
+        if (savedBonus) accDailyBonus = JSON.parse(savedBonus);
+      } catch {}
+    } else {
+      // Initialize brand new account storage
+      try {
+        localStorage.setItem(getUserKey(phone, 'balance'), INITIAL_BALANCE.toString());
+        localStorage.setItem(getUserKey(phone, 'history'), '[]');
+        localStorage.setItem(getUserKey(phone, 'stats'), JSON.stringify(defaultStats));
+        localStorage.setItem(getUserKey(phone, 'withdraws'), '[]');
+        localStorage.setItem(getUserKey(phone, 'deposits'), '[]');
+        localStorage.setItem(getUserKey(phone, 'daily_bonus'), JSON.stringify(defaultDailyBonus));
+        localStorage.removeItem(getUserKey(phone, 'bank'));
+      } catch {}
+    }
+
+    // Set user state
+    setUser(targetUser);
+    setBalance(accBalance);
+    setHistory(accHistory);
+    setStats(accStats);
+    setSavedBankDetails(accBank);
+    setWithdrawRecords(accWithdraws);
+    setDepositRecords(accDeposits);
+    setDailyBonus(accDailyBonus);
+
+    // Save auth session
+    try {
+      localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(targetUser));
+    } catch {}
+
+    // Trigger Supabase fetch for this user
+    userRef.current = targetUser;
+    balanceRef.current = accBalance;
+    await performSupabaseSync();
+  };
+
+  useEffect(() => {
+    if (user?.phoneNumber) {
+      performSupabaseSync();
+    }
+  }, [user?.phoneNumber]);
+
+  // Persist user-scoped data whenever state updates
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      localStorage.setItem(getUserKey(phone, 'balance'), balance.toString());
+    } catch {}
+  }, [balance, user?.phoneNumber]);
+
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      localStorage.setItem(getUserKey(phone, 'history'), JSON.stringify(history.slice(0, 60)));
+    } catch {}
+  }, [history, user?.phoneNumber]);
+
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      localStorage.setItem(getUserKey(phone, 'stats'), JSON.stringify(stats));
+    } catch {}
+  }, [stats, user?.phoneNumber]);
+
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      localStorage.setItem(getUserKey(phone, 'withdraws'), JSON.stringify(withdrawRecords.slice(0, 30)));
+    } catch {}
+  }, [withdrawRecords, user?.phoneNumber]);
+
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      localStorage.setItem(getUserKey(phone, 'deposits'), JSON.stringify(depositRecords.slice(0, 30)));
+    } catch {}
+  }, [depositRecords, user?.phoneNumber]);
+
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      if (savedBankDetails) {
+        localStorage.setItem(getUserKey(phone, 'bank'), JSON.stringify(savedBankDetails));
+      } else {
+        localStorage.removeItem(getUserKey(phone, 'bank'));
+      }
+    } catch {}
+  }, [savedBankDetails, user?.phoneNumber]);
+
+  useEffect(() => {
+    if (!user?.phoneNumber) return;
+    const phone = user.phoneNumber;
+    try {
+      localStorage.setItem(getUserKey(phone, 'daily_bonus'), JSON.stringify(dailyBonus));
+    } catch {}
+  }, [dailyBonus, user?.phoneNumber]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(accounts));
+    } catch {}
+  }, [accounts]);
 
   useEffect(() => {
     try {
@@ -306,255 +722,240 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
   }, [soundEnabled]);
 
-  const applyAccountState = useCallback((state: AccountStatePayload) => {
-    setUser(state.user);
-    userRef.current = state.user;
-    setBalance(state.balance);
-    balanceRef.current = state.balance;
-    setHasCompletedFirstDeposit(state.hasCompletedFirstDeposit);
-    setStats(state.stats);
-    setDailyBonus(state.dailyBonus);
-    setCanClaimDailyBonus(state.canClaimDailyBonus);
-    setTimeUntilNextBonus(state.timeUntilNextBonus);
-    setHistory(state.latestBets);
-    historyRef.current = state.latestBets;
-    setTotalBetsCount(state.totalBetsCount);
-    setDepositRecords(state.depositRecords);
-    setWithdrawRecords(state.withdrawRecords);
-    setSavedBankDetails(state.savedBankDetails);
-    setUserReferrals(state.userReferrals);
-    setUserReferralBonuses(state.userReferralBonuses);
-  }, []);
-
-  const refreshWinGoState = useCallback(async () => {
-    try {
-      const res = await api.getWinGoState();
-      if (res.success) {
-        const offset = res.serverTimeMs - Date.now();
-        serverClockOffsetRef.current = offset;
-        setServerClockOffsetMs(offset);
-        setWingoCurrentPeriods(res.currentPeriods);
-        setWingoRoundsByDuration(res.historiesByDuration);
-
-        if (res.settledBets && res.settledBets.length > 0) {
-          setHistory((prev) => {
-            const map = new Map<string, GameHistoryItem>();
-            res.settledBets.forEach((b) => map.set(b.id, b));
-            prev.forEach((p) => {
-              if (!map.has(p.id)) map.set(p.id, p);
-            });
-            const merged = Array.from(map.values()).sort((a, b) => b.timestamp - a.timestamp);
-            historyRef.current = merged;
-            return merged;
-          });
-        }
-      }
-    } catch (err) {
-      console.warn('WinGo state refresh warning:', err);
+  const playSound = (
+    type: 'click' | 'bet' | 'tick' | 'card' | 'flip' | 'win' | 'jackpot' | 'loss' | 'countdown_beep' | 'round_end',
+    arg?: number
+  ) => {
+    if (soundEnabledRef.current) {
+      soundManager.play(type, arg);
     }
-  }, []);
+  };
 
-  const refreshAccountState = useCallback(async () => {
-    try {
-      const res = await api.getAccountState();
-      if (res.success && res.authenticated && res.state) {
-        applyAccountState(res.state);
-      } else {
-        setUser(null);
-        userRef.current = null;
-      }
-    } catch (err) {
-      console.warn('Account state load warning:', err);
-    } finally {
-      setIsAuthLoading(false);
+  const toggleSound = () => {
+    const next = !soundEnabledRef.current;
+    soundEnabledRef.current = next;
+    setSoundEnabled(next);
+    if (next) {
+      soundManager.play('click');
     }
-  }, [applyAccountState]);
+  };
 
-  // Initial load: restore session from backend HttpOnly cookie and fetch official WinGo rounds
-  useEffect(() => {
-    refreshAccountState();
-    refreshWinGoState();
-  }, [refreshAccountState, refreshWinGoState]);
-
-  // Keep daily bonus countdown eligibility fresh when 24h expires while app is open
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!dailyBonus.lastClaimedAt) {
-        if (!canClaimDailyBonus) setCanClaimDailyBonus(true);
-        if (timeUntilNextBonus !== 0) setTimeUntilNextBonus(0);
-        return;
-      }
-      const elapsed = Date.now() - dailyBonus.lastClaimedAt;
-      const left = Math.max(0, BONUS_COOLDOWN_MS - elapsed);
-      setTimeUntilNextBonus(left);
-      setCanClaimDailyBonus(left === 0);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [dailyBonus.lastClaimedAt, canClaimDailyBonus, timeUntilNextBonus]);
-
-  const pendingWinGoBets = useMemo(() => {
-    return history.filter((h) => h.gameId === 'color-prediction' && h.status === 'Pending');
-  }, [history]);
-
-  const settleWinGoBets = useCallback(async () => {
-    if (!userRef.current) return { settledBets: [] };
-    if (isSettlingRef.current) return { settledBets: [] };
-    isSettlingRef.current = true;
-    try {
-      const res = await api.settleWinGoBets();
-      if (res.success) {
-        const offset = res.serverTimeMs - Date.now();
-        serverClockOffsetRef.current = offset;
-        setServerClockOffsetMs(offset);
-        setWingoCurrentPeriods(res.currentPeriods);
-        setWingoRoundsByDuration(res.historiesByDuration);
-        setBalance(res.balance);
-        balanceRef.current = res.balance;
-        setStats(res.stats);
-
-        if (res.settledBets && res.settledBets.length > 0) {
-          setHistory((prev) => {
-            const map = new Map<string, GameHistoryItem>();
-            res.settledBets.forEach((b) => map.set(b.id, b));
-            prev.forEach((p) => {
-              if (!map.has(p.id)) map.set(p.id, p);
-            });
-            const merged = Array.from(map.values()).sort((a, b) => b.timestamp - a.timestamp);
-            historyRef.current = merged;
-            return merged;
-          });
-        } else {
-          // If background server ticker settled the bet 200ms earlier, sync latest bets from DB
-          const latest = await api.getBets({ page: 1, limit: 50 });
-          if (latest.success) {
-            setHistory(latest.items);
-            historyRef.current = latest.items;
-            setTotalBetsCount(latest.totalCount);
-            setStats(latest.stats);
-          }
-        }
-
-        return {
-          settledBets: res.settledBets || [],
-          historiesByDuration: res.historiesByDuration,
-          currentPeriods: res.currentPeriods,
-          serverTimeMs: res.serverTimeMs,
-        };
-      }
-      return { settledBets: [] };
-    } finally {
-      isSettlingRef.current = false;
+  const login = (phoneNumber: string, password: string): { success: boolean; error?: string } => {
+    const cleanedPhone = phoneNumber.trim().replace(/\D/g, '');
+    if (cleanedPhone.length < 10) {
+      return { success: false, error: 'Please enter a valid 10-digit mobile number' };
     }
-  }, []);
+    if (!password) {
+      return { success: false, error: 'Password is required' };
+    }
 
-  // Global settlement tick: when any pending WinGo bet's round has ended, call server settle
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!userRef.current) return;
-      const nowServer = Date.now() + serverClockOffsetRef.current;
-      const hasReadyPending = historyRef.current.some((h) => {
-        if (h.gameId !== 'color-prediction' || h.status !== 'Pending' || !h.period) return false;
-        const { roundEndTime } = parsePeriodToTimestamp(h.period, h.duration || 30);
-        return nowServer >= roundEndTime;
-      });
-      if (hasReadyPending) {
-        settleWinGoBets();
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [settleWinGoBets]);
+    const matched = accounts.find((a) => a.phoneNumber === cleanedPhone);
+    if (!matched) {
+      return { success: false, error: 'No account found with this phone number. Please register.' };
+    }
 
-  // Sync account & rounds when window regains visibility or focus
-  useEffect(() => {
-    const handleSync = () => {
-      if (userRef.current) {
-        refreshAccountState();
-      }
-      refreshWinGoState();
+    if (matched.passwordHash !== password) {
+      return { success: false, error: 'Incorrect password. Please try again.' };
+    }
+
+    const userProfile: UserProfile = {
+      phoneNumber: matched.phoneNumber,
+      memberId: matched.memberId,
+      registeredAt: matched.registeredAt,
     };
-    window.addEventListener('visibilitychange', handleSync);
-    window.addEventListener('focus', handleSync);
-    return () => {
-      window.removeEventListener('visibilitychange', handleSync);
-      window.removeEventListener('focus', handleSync);
-    };
-  }, [refreshAccountState, refreshWinGoState]);
 
-  const login = async (
-    phoneNumber: string,
-    password: string
-  ): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.login({ phoneNumber, password });
-    if (!res.success || !res.state) {
-      return { success: false, error: res.error || 'Failed to sign in' };
-    }
-    setAuthToken(res.token || null);
-    applyAccountState(res.state);
-    refreshWinGoState();
+    // Load and switch to this account's isolated data
+    switchAccount(userProfile, false);
     playSound('win');
     return { success: true };
   };
 
-  const register = async (
+  const register = (
     phoneNumber: string,
     password: string,
     confirmPassword: string,
     inviteCode?: string
-  ): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.register({ phoneNumber, password, confirmPassword, inviteCode });
-    if (!res.success || !res.state) {
-      return { success: false, error: res.error || 'Registration failed' };
+  ): { success: boolean; error?: string } => {
+    const cleanedPhone = phoneNumber.trim().replace(/\D/g, '');
+    if (cleanedPhone.length < 10) {
+      return { success: false, error: 'Please enter a valid 10-digit mobile number' };
     }
-    setAuthToken(res.token || null);
-    applyAccountState(res.state);
-    refreshWinGoState();
+    if (password.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters long' };
+    }
+    if (password !== confirmPassword) {
+      return { success: false, error: 'Passwords do not match' };
+    }
+
+    const exists = accounts.find((a) => a.phoneNumber === cleanedPhone);
+    if (exists) {
+      return { success: false, error: 'An account with this phone number already exists' };
+    }
+
+    const cleanedInvite = (inviteCode || '').trim().toUpperCase();
+    const cleanedInviteDigits = cleanedInvite.replace(/\D/g, '');
+    let matchedReferrer: StoredAccount | undefined;
+
+    if (cleanedInvite && cleanedInvite !== 'COBCLUBVIP') {
+      matchedReferrer = accounts.find(
+        (a) =>
+          a.memberId.toUpperCase() === cleanedInvite ||
+          (cleanedInviteDigits.length >= 10 && a.phoneNumber === cleanedInviteDigits)
+      );
+      if (matchedReferrer && matchedReferrer.phoneNumber === cleanedPhone) {
+        return { success: false, error: 'You cannot use your own referral code' };
+      }
+    }
+
+    let newMemberId = `COB${Math.floor(1000 + Math.random() * 9000)}`;
+    while (accounts.some((a) => a.memberId === newMemberId)) {
+      newMemberId = `COB${Math.floor(1000 + Math.random() * 9000)}`;
+    }
+
+    const now = Date.now();
+    const newAccount: StoredAccount = {
+      phoneNumber: cleanedPhone,
+      passwordHash: password,
+      memberId: newMemberId,
+      registeredAt: now,
+      referredBy: matchedReferrer?.memberId,
+    };
+
+    const nextAccounts = [...accounts, newAccount];
+    setAccounts(nextAccounts);
+    try {
+      localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(nextAccounts));
+    } catch {}
+
+    if (matchedReferrer) {
+      const newRefRecord: ReferralRecord = {
+        id: `REF_${now}_${Math.random().toString(36).substring(2, 6)}`,
+        referrerMemberId: matchedReferrer.memberId,
+        referrerPhone: matchedReferrer.phoneNumber,
+        refereeMemberId: newMemberId,
+        refereePhone: cleanedPhone,
+        registeredAt: now,
+        firstDepositCompleted: false,
+        rewardAmount: REFERRAL_REWARD_AMOUNT,
+      };
+      const updatedRefs = [newRefRecord, ...referralsRef.current];
+      referralsRef.current = updatedRefs;
+      setReferrals(updatedRefs);
+      try {
+        localStorage.setItem(STORAGE_KEY_REFERRALS, JSON.stringify(updatedRefs));
+      } catch {}
+    }
+
+    const userProfile: UserProfile = {
+      phoneNumber: cleanedPhone,
+      memberId: newMemberId,
+      registeredAt: now,
+      referredBy: matchedReferrer?.memberId,
+    };
+
+    // Initialize fresh account state & sync to Supabase
+    switchAccount(userProfile, true);
     playSound('jackpot');
+
+    // Create profile in Supabase
+    updateWalletBalanceInSupabase(newMemberId, cleanedPhone, INITIAL_BALANCE);
+
     return { success: true };
   };
 
-  const sendPasswordResetOtp = async (
-    phoneNumber: string
-  ): Promise<{ success: boolean; message?: string; error?: string }> => {
-    const res = await api.sendOtp(phoneNumber);
-    if (res.success) playSound('tick');
-    return res;
+  const otpStoreRef = useRef<Record<string, { otp: string; expiresAt: number }>>({});
+
+  const sendPasswordResetOtp = (phoneNumber: string): { success: boolean; otp?: string; error?: string } => {
+    const cleanedPhone = phoneNumber.trim().replace(/\D/g, '');
+    if (cleanedPhone.length < 10) {
+      return { success: false, error: 'Please enter a valid 10-digit mobile number' };
+    }
+
+    const matched = accounts.find((a) => a.phoneNumber === cleanedPhone);
+    if (!matched) {
+      return { success: false, error: 'No account found with this mobile number. Please check the number or register.' };
+    }
+
+    // Generate authentic 6-digit OTP
+    const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes validity
+
+    otpStoreRef.current[cleanedPhone] = {
+      otp: generatedOtp,
+      expiresAt,
+    };
+
+    playSound('tick');
+    return { success: true, otp: generatedOtp };
   };
 
-  const resetPasswordWithOtp = async (
+  const resetPasswordWithOtp = (
     phoneNumber: string,
     otp: string,
     newPassword: string,
     confirmPassword: string
-  ): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.resetPassword({ phoneNumber, otp, newPassword, confirmPassword });
-    if (res.success) playSound('win');
-    return res;
+  ): { success: boolean; error?: string } => {
+    const cleanedPhone = phoneNumber.trim().replace(/\D/g, '');
+    if (cleanedPhone.length < 10) {
+      return { success: false, error: 'Please enter a valid 10-digit mobile number' };
+    }
+
+    const storedData = otpStoreRef.current[cleanedPhone];
+    if (!storedData) {
+      return { success: false, error: 'Please request an OTP first by clicking "Send OTP"' };
+    }
+
+    if (Date.now() > storedData.expiresAt) {
+      return { success: false, error: 'OTP has expired. Please request a new OTP' };
+    }
+
+    if (storedData.otp !== otp.trim()) {
+      return { success: false, error: 'Invalid OTP code. Please enter the correct 6-digit code' };
+    }
+
+    if (newPassword.length < 6) {
+      return { success: false, error: 'New password must be at least 6 characters long' };
+    }
+
+    if (newPassword !== confirmPassword) {
+      return { success: false, error: 'New password and confirm password do not match' };
+    }
+
+    // Update account in accounts list
+    let updated = false;
+    const updatedAccounts = accounts.map((a) => {
+      if (a.phoneNumber === cleanedPhone) {
+        updated = true;
+        return {
+          ...a,
+          passwordHash: newPassword,
+        };
+      }
+      return a;
+    });
+
+    if (!updated) {
+      return { success: false, error: 'Account not found' };
+    }
+
+    setAccounts(updatedAccounts);
+    try {
+      localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(updatedAccounts));
+    } catch {}
+
+    // Invalidate used OTP
+    delete otpStoreRef.current[cleanedPhone];
+
+    playSound('win');
+    return { success: true };
   };
 
-  const logout = async () => {
+  const logout = () => {
     playSound('click');
-    try {
-      await api.logout();
-    } catch {}
-    setAuthToken(null);
-    setAdminToken(null);
-    setIsAdminUnlocked(false);
-    setMasterDepositRequests([]);
     setUser(null);
-    userRef.current = null;
-    setHistory([]);
-    historyRef.current = [];
-    setTotalBetsCount(0);
-    setStats(defaultStats);
-    setBalance(INITIAL_BALANCE);
-    setDailyBonus(defaultDailyBonus);
-    setCanClaimDailyBonus(true);
-    setTimeUntilNextBonus(0);
-    setDepositRecords([]);
-    setWithdrawRecords([]);
-    setSavedBankDetails(null);
-    setUserReferrals([]);
-    setUserReferralBonuses([]);
+    try {
+      localStorage.removeItem(STORAGE_KEY_AUTH);
+    } catch {}
     setActiveView('home');
     setSelectedGameId(null);
   };
@@ -588,74 +989,33 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       playSound('loss');
       return false;
     }
-    if (amount <= 0 || balanceRef.current < amount) {
+    if (amount <= 0 || balance < amount) {
       return false;
     }
-    const prevBal = balanceRef.current;
-    const optimistic = Number((prevBal - amount).toFixed(2));
-    setBalance(optimistic);
-    balanceRef.current = optimistic;
+    const nextBalance = balance - amount;
+    setBalance(nextBalance);
+    balanceRef.current = nextBalance;
     playSound('bet');
 
-    api.placeInstantBet(amount).then((res) => {
-      if (res.success && typeof res.balance === 'number') {
-        setBalance(res.balance);
-        balanceRef.current = res.balance;
-      } else {
-        setBalance(prevBal);
-        balanceRef.current = prevBal;
-      }
-    });
+    // Sync updated balance to Supabase and user storage
+    if (user) {
+      updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
+    }
     return true;
   };
 
   const refundBet = (amount: number) => {
-    if (amount <= 0) return;
-    api.refundInstantBet(amount).then((res) => {
-      if (res.success && typeof res.balance === 'number') {
-        setBalance(res.balance);
-        balanceRef.current = res.balance;
-      }
-    });
-  };
-
-  const recordGameResult = async (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => {
-    if (item.isWin) {
-      if (item.payout >= item.betAmount * 5) playSound('jackpot');
-      else playSound('win');
-    } else {
-      playSound('loss');
-    }
-
-    const res = await api.recordInstantBet({
-      gameId: item.gameId,
-      gameTitle: item.gameTitle,
-      betAmount: item.betAmount,
-      choice: item.choice,
-      outcome: item.outcome,
-      payout: item.payout,
-      commission: item.commission,
-      isWin: item.isWin,
-    });
-
-    if (res.success && res.bet) {
-      setHistory((prev) => {
-        const updated = [res.bet!, ...prev.filter((p) => p.id !== res.bet!.id)];
-        historyRef.current = updated;
-        return updated;
-      });
-      if (typeof res.balance === 'number') {
-        setBalance(res.balance);
-        balanceRef.current = res.balance;
-      }
-      if (res.stats) setStats(res.stats);
-      setTotalBetsCount((c) => c + 1);
+    const nextBalance = balance + amount;
+    setBalance(nextBalance);
+    balanceRef.current = nextBalance;
+    if (user) {
+      updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
     }
   };
 
-  const submitWinGoBet = async (
-    order: WinGoBetOrderInput
-  ): Promise<{ success: boolean; bet?: GameHistoryItem; betId?: string; error?: string }> => {
+  // Submit a continuous WinGo bet: immediately deducts wager, creates pending record with unique ID,
+  // syncs to Supabase bet_history, and guarantees the bet is never cancelled on navigation or reload
+  const submitWinGoBet = (order: WinGoBetOrderInput): { success: boolean; betId?: string; error?: string } => {
     if (!hasCompletedFirstDeposit) {
       setFirstDepositPromptMessage('Deposit 1 time to play with bonus money');
       setShowFirstDepositPrompt(true);
@@ -663,180 +1023,905 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       playSound('loss');
       return { success: false, error: 'Deposit 1 time to play with bonus money' };
     }
-
-    const res = await api.placeWinGoBet(order);
-    if (!res.success || !res.bet) {
-      return { success: false, error: res.error || 'Failed to place bet in database' };
+    if (order.amount <= 0) {
+      return { success: false, error: 'Invalid bet amount' };
+    }
+    if (balance < order.amount) {
+      return { success: false, error: 'Insufficient available points' };
     }
 
+    const nextBalance = balance - order.amount;
+    setBalance(nextBalance);
+    balanceRef.current = nextBalance;
     playSound('bet');
-    if (typeof res.balance === 'number') {
-      setBalance(res.balance);
-      balanceRef.current = res.balance;
+
+    const phone = user?.phoneNumber || '9876543210';
+    const memberId = user?.memberId || 'COB8892';
+
+    if (user) {
+      try {
+        localStorage.setItem(getUserKey(phone, 'balance'), nextBalance.toString());
+      } catch {}
+      updateWalletBalanceInSupabase(memberId, phone, nextBalance);
     }
+
+    const betId = `wingo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const pendingItem: GameHistoryItem = {
+      id: betId,
+      gameId: 'color-prediction',
+      gameTitle: `Color Prediction (Win Go ${order.duration >= 60 ? `${order.duration / 60}Min` : `${order.duration}s`})`,
+      betAmount: order.amount,
+      choice: `${order.label} [Issue ${order.period.slice(-4)}]`,
+      outcome: 'Pending Resolution',
+      payout: 0,
+      netProfit: -order.amount,
+      isWin: false,
+      timestamp: Date.now(),
+      status: 'Pending',
+      period: order.period,
+      target: String(order.target),
+      multiplier: order.multiplier,
+      duration: order.duration,
+      selectedOption: order.selectedOption || String(order.target).toUpperCase(),
+      grossPayout: 0,
+      commission: 0,
+    };
+
     setHistory((prev) => {
-      const updated = [res.bet!, ...prev.filter((p) => p.id !== res.bet!.id)];
+      const updated = [pendingItem, ...prev.filter((p) => p.id !== betId)].slice(0, 100);
       historyRef.current = updated;
+      try {
+        localStorage.setItem(getUserKey(phone, 'history'), JSON.stringify(updated.slice(0, 60)));
+      } catch {}
       return updated;
     });
-    setTotalBetsCount((c) => c + 1);
 
-    return { success: true, bet: res.bet, betId: res.bet.id };
+    // Record in master player records
+    const playerBetItem: PlayerBetRecord = {
+      ...pendingItem,
+      memberId,
+      phoneNumber: phone,
+    };
+    setMasterPlayerBets((prev) => {
+      const updated = [playerBetItem, ...prev.filter((b) => b.id !== playerBetItem.id)].slice(0, 300);
+      try {
+        localStorage.setItem(STORAGE_KEY_MASTER_PLAYER_BETS, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // Persist pending bet immediately to Supabase
+    recordBetInSupabase(pendingItem, memberId, phone);
+
+    return { success: true, betId };
   };
 
-  const fetchPaginatedBets = useCallback(
-    async (params: {
-      page?: number;
-      limit?: number;
-      gameId?: string;
-      outcome?: 'all' | 'wins' | 'losses';
-      status?: 'all' | 'Completed' | 'Pending';
-    }): Promise<PaginatedBetsResponse> => {
-      const res = await api.getBets(params);
-      if (res.success && res.stats) {
-        setStats(res.stats);
-      }
-      return res;
-    },
-    []
-  );
+  const isSettlingRef = useRef(false);
 
-  const claimDailyBonus = async (): Promise<{
-    success: boolean;
-    amount: number;
-    day: number;
-    error?: string;
-  }> => {
-    if (isClaimingRef.current) {
-      return { success: false, amount: 0, day: dailyBonus.streak || 1, error: 'Processing claim...' };
-    }
-    isClaimingRef.current = true;
-    setIsClaimingDailyBonus(true);
+  // Global continuous settlement algorithm: evaluates any pending WinGo bets whose periods have completed
+  const settleWinGoBets = async (forcedOutcomes?: Record<string, number>) => {
+    if (isSettlingRef.current) return;
+    isSettlingRef.current = true;
 
     try {
-      const res = await api.claimDailyBonus();
-      if (res.dailyBonus) setDailyBonus(res.dailyBonus);
-      if (typeof res.canClaimDailyBonus === 'boolean') setCanClaimDailyBonus(res.canClaimDailyBonus);
-      if (typeof res.timeUntilNextBonus === 'number') setTimeUntilNextBonus(res.timeUntilNextBonus);
+      const now = Date.now();
+      const currentHist = historyRef.current;
+      const pendingBets = currentHist.filter(
+        (h) => h.gameId === 'color-prediction' && h.status === 'Pending' && h.period
+      );
 
-      if (!res.success) {
+      if (pendingBets.length === 0) {
+        return;
+      }
+
+      const activeWinManager = winManagerEnabledRef.current;
+      let balanceIncrement = 0;
+      let didUpdateAny = false;
+      const settledBetIds = new Set<string>();
+
+      const updatedHistory = currentHist.map((item) => {
+        if (item.gameId !== 'color-prediction' || item.status !== 'Pending' || !item.period) {
+          return item;
+        }
+
+        const dur = item.duration || 30;
+        const { roundEndTime } = parsePeriodToTimestamp(item.period, dur);
+        const outcomeKey = `${dur}_${item.period}`;
+        const hasForced = forcedOutcomes && typeof forcedOutcomes[outcomeKey] === 'number';
+
+        // Check if round has elapsed (unless explicitly forced by resolveRound right at boundary)
+        if (!hasForced && now < roundEndTime) {
+          return item;
+        }
+
+        // Look up all pending bets for this exact period and duration
+        const periodBets = pendingBets.filter(
+          (p) => p.period === item.period && (p.duration || 30) === dur
+        );
+        const { roundIdx } = parsePeriodToTimestamp(item.period, dur);
+        const defaultNum = getDeterministicNumberForRound(roundIdx, dur);
+        const recordedNum = settledRoundOutcomesRef.current[outcomeKey];
+        const drawnNum = hasForced
+          ? forcedOutcomes[outcomeKey]
+          : typeof recordedNum === 'number'
+          ? recordedNum
+          : periodBets.length > 0
+          ? determineWinGoOutcome(
+              periodBets.map((b) => ({ target: b.target as any, amount: b.betAmount })),
+              activeWinManager,
+              defaultNum
+            )
+          : defaultNum;
+
+        recordSettledRoundOutcome(dur, item.period, drawnNum);
+
+        const bigSmall: 'Big' | 'Small' = drawnNum >= 5 ? 'Big' : 'Small';
+        let color: 'green' | 'red' | 'purple_red' | 'purple_green';
+        if (drawnNum === 0) color = 'purple_red';
+        else if (drawnNum === 5) color = 'purple_green';
+        else if ([1, 3, 7, 9].includes(drawnNum)) color = 'green';
+        else color = 'red';
+
+        let targetVal: any = item.target;
+        if (targetVal !== undefined && !isNaN(Number(targetVal))) {
+          targetVal = Number(targetVal);
+        }
+
+        const evalRes = evaluateWinGoBet(targetVal, item.betAmount, drawnNum, undefined, activeWinManager);
+
+        didUpdateAny = true;
+        settledBetIds.add(item.id);
+        if (evalRes.isWin && evalRes.payout > 0) {
+          balanceIncrement += evalRes.payout;
+        }
+
+        const outcomeText = `Number ${drawnNum} (${bigSmall})`;
+
+        // Persist finalized game round to Supabase
+        recordGameRoundInSupabase({
+          id: `${dur}_${item.period}`,
+          duration: dur,
+          period: item.period,
+          roundIndex: roundIdx,
+          number: drawnNum,
+          color: color,
+          bigSmall: bigSmall,
+          finalizedAt: roundEndTime,
+        });
+
+        // Update bet outcome in Supabase
+        updateBetOutcomeInSupabase(
+          item.id,
+          outcomeText,
+          evalRes.payout,
+          evalRes.netProfit,
+          evalRes.isWin,
+          roundEndTime
+        );
+
         return {
-          success: false,
-          amount: 0,
-          day: res.dailyBonus?.streak || dailyBonus.streak || 1,
-          error: res.error || 'Unable to claim daily bonus',
+          ...item,
+          status: 'Completed' as const,
+          outcome: outcomeText,
+          payout: evalRes.payout,
+          grossPayout: evalRes.grossPayout,
+          commission: evalRes.commission,
+          netProfit: evalRes.netProfit,
+          isWin: evalRes.isWin,
+          resultNumber: drawnNum,
+          resultColor: evalRes.resultColor,
+          selectedOption: evalRes.selectedOption || String(item.target).toUpperCase(),
+          settledAt: roundEndTime,
         };
-      }
+      });
 
-      if (typeof res.newBalance === 'number') {
-        setBalance(res.newBalance);
-        balanceRef.current = res.newBalance;
-      }
-      playSound('jackpot');
+      if (didUpdateAny) {
+        setHistory(updatedHistory);
+        historyRef.current = updatedHistory;
 
-      return {
-        success: true,
-        amount: res.amount || 0,
-        day: res.day || 1,
-      };
+        const phone = userRef.current?.phoneNumber || '9876543210';
+        const memberId = userRef.current?.memberId || 'COB8892';
+
+        try {
+          localStorage.setItem(getUserKey(phone, 'history'), JSON.stringify(updatedHistory.slice(0, 60)));
+        } catch {}
+
+        if (balanceIncrement > 0) {
+          setBalance((prevBal) => {
+            const nextBal = prevBal + balanceIncrement;
+            balanceRef.current = nextBal;
+            try {
+              localStorage.setItem(getUserKey(phone, 'balance'), nextBal.toString());
+            } catch {}
+            if (userRef.current) {
+              updateWalletBalanceInSupabase(memberId, phone, nextBal);
+            }
+            return nextBal;
+          });
+          playSound('win');
+        }
+
+        // Update stats
+        setStats((prevStats) => {
+          let addedRounds = 0;
+          let addedWagered = 0;
+          let addedWins = 0;
+          let addedLosses = 0;
+          let addedWon = 0;
+          let biggestWin = prevStats.biggestWin;
+
+          updatedHistory.forEach((h) => {
+            if (settledBetIds.has(h.id)) {
+              addedRounds++;
+              addedWagered += h.betAmount;
+              if (h.isWin) {
+                addedWins++;
+                addedWon += h.payout;
+                if (h.payout > biggestWin) biggestWin = h.payout;
+              } else {
+                addedLosses++;
+              }
+            }
+          });
+
+          const nextStats = {
+            ...prevStats,
+            totalRounds: prevStats.totalRounds + addedRounds,
+            totalWagered: prevStats.totalWagered + addedWagered,
+            totalWins: prevStats.totalWins + addedWins,
+            totalLosses: prevStats.totalLosses + addedLosses,
+            totalWon: prevStats.totalWon + addedWon,
+            biggestWin,
+          };
+
+          try {
+            localStorage.setItem(getUserKey(phone, 'stats'), JSON.stringify(nextStats));
+          } catch {}
+          return nextStats;
+        });
+
+        // Update masterPlayerBets
+        setMasterPlayerBets((prev) => {
+          const updated = prev.map((p) => {
+            if (settledBetIds.has(p.id)) {
+              const match = updatedHistory.find((u) => u.id === p.id);
+              if (match) {
+                return {
+                  ...p,
+                  status: 'Completed' as const,
+                  outcome: match.outcome,
+                  payout: match.payout,
+                  commission: match.commission,
+                  netProfit: match.netProfit,
+                  isWin: match.isWin,
+                  settledAt: match.settledAt,
+                };
+              }
+            }
+            return p;
+          });
+          try {
+            localStorage.setItem(STORAGE_KEY_MASTER_PLAYER_BETS, JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+      }
     } finally {
-      isClaimingRef.current = false;
-      setIsClaimingDailyBonus(false);
+      isSettlingRef.current = false;
     }
   };
 
-  const submitDepositRequest = async (data: {
+  // Continuous global background settlement loop: runs every 1 second
+  // Ensures any pending bets are resolved on time, even if user navigated away or refreshed
+  useEffect(() => {
+    settleWinGoBets();
+    const interval = setInterval(() => {
+      settleWinGoBets();
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Sync and settle on window visibility and focus
+  useEffect(() => {
+    const handleSync = () => {
+      settleWinGoBets();
+    };
+    window.addEventListener('visibilitychange', handleSync);
+    window.addEventListener('focus', handleSync);
+    return () => {
+      window.removeEventListener('visibilitychange', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
+  }, []);
+
+  const recordGameResult = (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => {
+    let finalPayout = item.payout;
+    let finalCommission = item.commission || 0;
+    let finalNetProfit = item.netProfit;
+
+    // Deduct 2.4% commission on winning payouts
+    if (item.isWin && finalPayout > 0 && finalCommission === 0) {
+      finalCommission = Number((finalPayout * 0.024).toFixed(2));
+      finalPayout = Number((finalPayout - finalCommission).toFixed(2));
+      finalNetProfit = Number((finalPayout - item.betAmount).toFixed(2));
+    }
+
+    const fullItem: GameHistoryItem = {
+      ...item,
+      payout: finalPayout,
+      commission: finalCommission,
+      netProfit: finalNetProfit,
+      id: 'round_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      timestamp: Date.now(),
+    };
+
+    let nextBalance = balance;
+    if (fullItem.payout > 0) {
+      nextBalance = balance + fullItem.payout;
+      setBalance(nextBalance);
+      balanceRef.current = nextBalance;
+    }
+
+    if (fullItem.isWin) {
+      if (fullItem.payout >= fullItem.betAmount * 5) {
+        playSound('jackpot');
+      } else {
+        playSound('win');
+      }
+    } else {
+      playSound('loss');
+    }
+
+    setHistory((prev) => [fullItem, ...prev].slice(0, 60));
+
+    setStats((prev) => {
+      const isWin = fullItem.isWin;
+      const nextStreak = isWin ? prev.currentStreak + 1 : 0;
+      const bestStreak = Math.max(prev.bestStreak, nextStreak);
+      const biggestWin = Math.max(prev.biggestWin, fullItem.payout);
+
+      return {
+        ...prev,
+        totalRounds: prev.totalRounds + 1,
+        totalWins: prev.totalWins + (isWin ? 1 : 0),
+        totalLosses: prev.totalLosses + (!isWin ? 1 : 0),
+        totalWagered: prev.totalWagered + fullItem.betAmount,
+        totalWon: prev.totalWon + fullItem.payout,
+        biggestWin,
+        currentStreak: nextStreak,
+        bestStreak,
+        favoriteGameId: fullItem.gameId,
+      };
+    });
+
+    // 1. Record bet into Master Player Records ("player bet history will save in my records")
+    const playerBetItem: PlayerBetRecord = {
+      ...fullItem,
+      memberId: user?.memberId || 'COB8892',
+      phoneNumber: user?.phoneNumber || '9876543210',
+    };
+
+    setMasterPlayerBets((prev) => {
+      const updated = [playerBetItem, ...prev.filter((b) => b.id !== playerBetItem.id)].slice(0, 300);
+      try {
+        localStorage.setItem(STORAGE_KEY_MASTER_PLAYER_BETS, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // 2. Persist to user account in Supabase
+    if (user) {
+      recordBetInSupabase(fullItem, user.memberId, user.phoneNumber);
+      updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
+    } else {
+      recordBetInSupabase(fullItem, 'COB8892', '9876543210');
+    }
+  };
+
+  const refreshMasterPlayerBets = async () => {
+    try {
+      const cloudAll = await fetchAllPlayerBetsFromSupabase();
+      if (cloudAll && cloudAll.length > 0) {
+        setMasterPlayerBets((prev) => {
+          const map = new Map<string, PlayerBetRecord>();
+          cloudAll.forEach((b) => map.set(b.id, b));
+          prev.forEach((b) => {
+            if (!map.has(b.id)) map.set(b.id, b);
+          });
+          const merged = Array.from(map.values())
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 300);
+          try {
+            localStorage.setItem(STORAGE_KEY_MASTER_PLAYER_BETS, JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+      }
+    } catch (e) {
+      console.warn('Master player bets sync error:', e);
+    }
+  };
+
+  const canClaimDailyBonus =
+    !dailyBonus.lastClaimedAt || Date.now() - dailyBonus.lastClaimedAt >= BONUS_COOLDOWN_MS;
+
+  const timeUntilNextBonus = dailyBonus.lastClaimedAt
+    ? Math.max(0, BONUS_COOLDOWN_MS - (Date.now() - dailyBonus.lastClaimedAt))
+    : 0;
+
+  const claimDailyBonus = (): { success: boolean; amount: number; day: number; error?: string } => {
+    if (!canClaimDailyBonus) {
+      const hours = Math.ceil(timeUntilNextBonus / (1000 * 60 * 60));
+      return {
+        success: false,
+        amount: 0,
+        day: dailyBonus.streak || 1,
+        error: `Daily bonus already claimed! Next bonus ready in ${hours} hour${hours > 1 ? 's' : ''}.`,
+      };
+    }
+
+    let nextDay = 1;
+    if (dailyBonus.lastClaimedAt) {
+      const timeSinceLastClaim = Date.now() - dailyBonus.lastClaimedAt;
+      if (timeSinceLastClaim <= 48 * 60 * 60 * 1000) {
+        nextDay = (dailyBonus.streak % 7) + 1;
+      } else {
+        nextDay = 1;
+      }
+    } else {
+      nextDay = 1;
+    }
+
+    const tier = DAILY_BONUS_TIERS.find((t) => t.day === nextDay) || DAILY_BONUS_TIERS[0];
+    const points = tier.points;
+    const nextBalance = balance + points;
+
+    const newRecord: DailyBonusRecord = {
+      id: 'DB_' + Date.now(),
+      day: nextDay,
+      amount: points,
+      claimedAt: Date.now(),
+    };
+
+    const nextTotal = (dailyBonus.totalClaimed || 0) + points;
+    const nextBonusState: DailyBonusState = {
+      lastClaimedAt: Date.now(),
+      streak: nextDay,
+      totalClaimed: nextTotal,
+      history: [newRecord, ...dailyBonus.history].slice(0, 30),
+    };
+
+    setDailyBonus(nextBonusState);
+    setBalance(nextBalance);
+    balanceRef.current = nextBalance;
+    playSound('jackpot');
+
+    if (user?.phoneNumber) {
+      try {
+        localStorage.setItem(getUserKey(user.phoneNumber, 'daily_bonus'), JSON.stringify(nextBonusState));
+        localStorage.setItem(getUserKey(user.phoneNumber, 'balance'), nextBalance.toString());
+      } catch {}
+      recordDailyBonusInSupabase(user.memberId, user.phoneNumber, points, nextDay, nextTotal, nextBalance);
+    }
+
+    return { success: true, amount: points, day: nextDay };
+  };
+
+  const resetBalance = () => {
+    setBalance(INITIAL_BALANCE);
+    balanceRef.current = INITIAL_BALANCE;
+    playSound('win');
+    if (user) {
+      updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, INITIAL_BALANCE);
+    }
+  };
+
+  const submitDepositRequest = (data: {
     amount: number;
     bonus: number;
     method: string;
     utr: string;
     screenshot?: string;
-  }): Promise<{ success: boolean; record?: DepositRecord; error?: string }> => {
-    const res = await api.submitDeposit(data);
-    if (!res.success || !res.record) {
-      return { success: false, error: res.error || 'Failed to submit deposit' };
+  }): DepositRecord => {
+    const totalCredit = data.amount + data.bonus;
+    const txnId = 'DEP' + Math.floor(1000000 + Math.random() * 9000000);
+    const newRecord: DepositRecord = {
+      id: txnId,
+      memberId: user?.memberId || 'COB8892',
+      phoneNumber: user?.phoneNumber || '9876543210',
+      amount: data.amount,
+      bonus: data.bonus,
+      totalCredit,
+      method: data.method.toUpperCase(),
+      utr: data.utr.trim(),
+      screenshot: data.screenshot,
+      timestamp: Date.now(),
+      status: 'Pending', // PENDING APPROVAL! Points are only credited once admin approves
+    };
+
+    setDepositRecords((prev) => [newRecord, ...prev]);
+
+    setMasterDepositRequests((prev) => {
+      const updated = [newRecord, ...prev.filter((d) => d.id !== txnId)].slice(0, 150);
+      try {
+        localStorage.setItem(STORAGE_KEY_MASTER_DEPOSITS, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    if (user) {
+      try {
+        localStorage.setItem(
+          getUserKey(user.phoneNumber, 'deposits'),
+          JSON.stringify([newRecord, ...depositRecords.slice(0, 29)])
+        );
+      } catch {}
     }
-    setDepositRecords((prev) => [res.record!, ...prev]);
+
+    recordDepositInSupabase(newRecord);
     playSound('click');
-    return { success: true, record: res.record };
+    return newRecord;
   };
 
-  const refreshMasterDeposits = useCallback(async () => {
-    if (!hasAdminToken()) return;
-    const res = await api.getAdminDeposits();
-    if (res.success && res.deposits) {
-      setMasterDepositRequests(res.deposits);
-    }
-  }, []);
+  // Helper to credit any user (currently active or offline) accurately in localStorage + state + Supabase
+  const creditUserWallet = (targetPhone: string, targetMemberId: string, amount: number) => {
+    if (amount <= 0) return;
 
-  const unlockAdmin = async (passcode: string): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.unlockAdmin(passcode);
-    if (!res.success || !res.adminToken) {
-      return { success: false, error: res.error || 'Access denied. Incorrect password.' };
+    const isActive =
+      userRef.current &&
+      (userRef.current.phoneNumber === targetPhone || userRef.current.memberId === targetMemberId);
+
+    if (isActive) {
+      const nextBal = balanceRef.current + amount;
+      balanceRef.current = nextBal;
+      setBalance(nextBal);
+      try {
+        localStorage.setItem(getUserKey(targetPhone, 'balance'), nextBal.toString());
+      } catch {}
+      updateWalletBalanceInSupabase(targetMemberId, targetPhone, nextBal);
+      return;
     }
-    setAdminToken(res.adminToken);
-    setIsAdminUnlocked(true);
-    await refreshMasterDeposits();
+
+    try {
+      const savedBal = localStorage.getItem(getUserKey(targetPhone, 'balance'));
+      const currentBal = savedBal !== null ? Math.max(0, parseInt(savedBal, 10)) : INITIAL_BALANCE;
+      const nextBal = currentBal + amount;
+      localStorage.setItem(getUserKey(targetPhone, 'balance'), nextBal.toString());
+
+      const rawAccs = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
+      if (rawAccs) {
+        const accs = JSON.parse(rawAccs);
+        const idx = accs.findIndex((a: any) => a.phoneNumber === targetPhone || a.memberId === targetMemberId);
+        if (idx >= 0) {
+          accs[idx].balance = nextBal;
+          localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(accs));
+        }
+      }
+      updateWalletBalanceInSupabase(targetMemberId, targetPhone, nextBal);
+    } catch (err) {
+      console.warn('Error crediting wallet:', err);
+    }
+  };
+
+  // Process Refer & Earn rewards: ₹77 after referred friend completes 1st deposit, plus ₹355 extra every 5 qualified referrals
+  const processReferralRewardForDeposit = (refereePhone?: string, refereeMemberId?: string) => {
+    const currentRefs = referralsRef.current;
+    const targetRef = currentRefs.find(
+      (r) =>
+        !r.firstDepositCompleted &&
+        ((refereePhone && r.refereePhone === refereePhone) ||
+          (refereeMemberId && r.refereeMemberId === refereeMemberId))
+    );
+
+    if (!targetRef) return;
+
+    const now = Date.now();
+    const updatedRefs = currentRefs.map((r) =>
+      r.id === targetRef.id
+        ? {
+            ...r,
+            firstDepositCompleted: true,
+            firstDepositAt: now,
+            rewardAmount: REFERRAL_REWARD_AMOUNT,
+          }
+        : r
+    );
+    referralsRef.current = updatedRefs;
+    setReferrals(updatedRefs);
+    try {
+      localStorage.setItem(STORAGE_KEY_REFERRALS, JSON.stringify(updatedRefs));
+    } catch {}
+
+    // 1. Credit ₹77 for completed 1st deposit referral
+    creditUserWallet(targetRef.referrerPhone, targetRef.referrerMemberId, REFERRAL_REWARD_AMOUNT);
+
+    // 2. Check if referrer crossed a multiple of 5 qualified referrals for ₹355 extra bonus
+    const qualifiedCount = updatedRefs.filter(
+      (r) => r.referrerMemberId === targetRef.referrerMemberId && r.firstDepositCompleted
+    ).length;
+
+    const eligibleMilestones = Math.floor(qualifiedCount / REFERRAL_MILESTONE_TARGET);
+    const existingBonuses = referralMilestoneBonusesRef.current;
+    const awardedCount = existingBonuses.filter(
+      (b) => b.referrerMemberId === targetRef.referrerMemberId
+    ).length;
+
+    if (eligibleMilestones > awardedCount) {
+      const newBonuses: ReferralMilestoneBonus[] = [];
+      let totalExtraToCredit = 0;
+
+      for (let m = awardedCount + 1; m <= eligibleMilestones; m++) {
+        totalExtraToCredit += REFERRAL_MILESTONE_BONUS;
+        newBonuses.push({
+          id: `REFBONUS_${now}_${m}`,
+          referrerMemberId: targetRef.referrerMemberId,
+          referrerPhone: targetRef.referrerPhone,
+          milestoneCount: m * REFERRAL_MILESTONE_TARGET,
+          amount: REFERRAL_MILESTONE_BONUS,
+          awardedAt: now,
+        });
+      }
+
+      const updatedBonuses = [...newBonuses, ...existingBonuses];
+      referralMilestoneBonusesRef.current = updatedBonuses;
+      setReferralMilestoneBonuses(updatedBonuses);
+      try {
+        localStorage.setItem(STORAGE_KEY_REFERRAL_BONUSES, JSON.stringify(updatedBonuses));
+      } catch {}
+
+      creditUserWallet(targetRef.referrerPhone, targetRef.referrerMemberId, totalExtraToCredit);
+    }
+  };
+
+  const approveDepositRequest = (depositId: string): { success: boolean; error?: string } => {
+    const req =
+      masterDepositRequests.find((d) => d.id === depositId) ||
+      depositRecords.find((d) => d.id === depositId);
+
+    if (!req) return { success: false, error: 'Deposit request record not found.' };
+
+    if (req.status === 'Completed') {
+      return { success: false, error: 'Deposit has already been approved and credited.' };
+    }
+
+    const approvedAt = Date.now();
+    const updatedReq: DepositRecord = {
+      ...req,
+      status: 'Completed',
+      approvedAt,
+    };
+
+    // 1. Update master deposit requests
+    setMasterDepositRequests((prev) => {
+      const updated = prev.map((d) => (d.id === req.id ? updatedReq : d));
+      try {
+        localStorage.setItem(STORAGE_KEY_MASTER_DEPOSITS, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // 2. Check if current active user is the recipient
+    const isCurrentActiveUser =
+      user && (user.phoneNumber === req.phoneNumber || user.memberId === req.memberId);
+
+    if (isCurrentActiveUser) {
+      const nextBal = balance + req.totalCredit;
+      balanceRef.current = nextBal;
+      setBalance(nextBal);
+      setDepositRecords((prev) => prev.map((d) => (d.id === req.id ? updatedReq : d)));
+      playSound('jackpot');
+
+      if (user) {
+        try {
+          localStorage.setItem(getUserKey(user.phoneNumber, 'balance'), nextBal.toString());
+          localStorage.setItem(getUserKey(user.phoneNumber, 'has_deposited'), 'true');
+          const userDeps = depositRecords.map((d) => (d.id === req.id ? updatedReq : d));
+          localStorage.setItem(getUserKey(user.phoneNumber, 'deposits'), JSON.stringify(userDeps));
+        } catch {}
+        updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBal);
+      }
+    } else {
+      // Target user is another registered user: credit their stored balance
+      let offlineNextBal = req.totalCredit;
+      try {
+        if (req.phoneNumber) {
+          const targetPhone = req.phoneNumber;
+          const savedBal = localStorage.getItem(getUserKey(targetPhone, 'balance'));
+          const currentBal = savedBal !== null ? Math.max(0, parseInt(savedBal, 10)) : INITIAL_BALANCE;
+          const nextBal = currentBal + req.totalCredit;
+          offlineNextBal = nextBal;
+          localStorage.setItem(getUserKey(targetPhone, 'balance'), nextBal.toString());
+          localStorage.setItem(getUserKey(targetPhone, 'has_deposited'), 'true');
+
+          const rawDeps = localStorage.getItem(getUserKey(targetPhone, 'deposits'));
+          const list: DepositRecord[] = rawDeps ? JSON.parse(rawDeps) : [];
+          const updList = list.some((d) => d.id === req.id)
+            ? list.map((d) => (d.id === req.id ? updatedReq : d))
+            : [updatedReq, ...list];
+          localStorage.setItem(getUserKey(targetPhone, 'deposits'), JSON.stringify(updList));
+
+          const rawAccs = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
+          if (rawAccs) {
+            const accs = JSON.parse(rawAccs);
+            const idx = accs.findIndex((a: any) => a.phoneNumber === targetPhone);
+            if (idx >= 0) {
+              accs[idx].balance = nextBal;
+              localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(accs));
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Error crediting offline account:', err);
+      }
+
+      if (req.memberId && req.phoneNumber) {
+        updateWalletBalanceInSupabase(req.memberId, req.phoneNumber, offlineNextBal);
+      }
+    }
+
+    // 3. Process referral reward if this user was referred and hasn't completed first deposit yet
+    processReferralRewardForDeposit(req.phoneNumber, req.memberId);
+
+    updateDepositStatusInSupabase(req.id, 'Completed');
     return { success: true };
   };
 
-  const exitAdmin = () => {
-    setAdminToken(null);
-    setIsAdminUnlocked(false);
-    setMasterDepositRequests([]);
+  const rejectDepositRequest = (depositId: string, reason?: string): { success: boolean } => {
+    const rejectedReason = reason || 'Payment not verified (Invalid UTR or screenshot mismatch)';
+
+    setMasterDepositRequests((prev) => {
+      const updated = prev.map((d) =>
+        d.id === depositId ? { ...d, status: 'Rejected' as const, rejectedReason } : d
+      );
+      try {
+        localStorage.setItem(STORAGE_KEY_MASTER_DEPOSITS, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    setDepositRecords((prev) =>
+      prev.map((d) =>
+        d.id === depositId ? { ...d, status: 'Rejected' as const, rejectedReason } : d
+      )
+    );
+
+    updateDepositStatusInSupabase(depositId, 'Rejected', rejectedReason);
+    playSound('loss');
+    return { success: true };
   };
 
-  const approveDepositRequest = async (
-    depositId: string
-  ): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.approveDeposit(depositId);
-    if (res.success) {
-      await Promise.all([refreshMasterDeposits(), refreshAccountState()]);
+  const refreshMasterDeposits = async () => {
+    try {
+      const cloudAll = await fetchAllDepositsFromSupabase();
+      if (cloudAll && cloudAll.length > 0) {
+        setMasterDepositRequests((prev) => {
+          const map = new Map<string, DepositRecord>();
+          cloudAll.forEach((d) => map.set(d.id, d));
+          prev.forEach((d) => {
+            if (!map.has(d.id)) map.set(d.id, d);
+          });
+          const merged = Array.from(map.values()).sort((a, b) => b.timestamp - a.timestamp);
+          try {
+            localStorage.setItem(STORAGE_KEY_MASTER_DEPOSITS, JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+      }
+    } catch (e) {
+      console.warn('Refresh master deposits error:', e);
     }
-    return res;
   };
 
-  const rejectDepositRequest = async (
-    depositId: string,
-    reason?: string
-  ): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.rejectDeposit(depositId, reason);
-    if (res.success) {
-      playSound('loss');
-      await Promise.all([refreshMasterDeposits(), refreshAccountState()]);
+  const deposit = (amount: number, bonus: number = 0, method: string = 'UPI Fast'): DepositRecord => {
+    // When deposit is invoked without UTR, submit request for admin verification
+    const mockUtr = String(Math.floor(100000000000 + Math.random() * 900000000000));
+    return submitDepositRequest({
+      amount,
+      bonus,
+      method,
+      utr: mockUtr,
+    });
+  };
+
+  const toggleWinManager = () => {
+    setWinManagerEnabled((prev) => !prev);
+    playSound('click');
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    if (user) {
+      try {
+        localStorage.setItem(getUserKey(user.phoneNumber, 'history'), '[]');
+      } catch {}
     }
-    return res;
   };
 
-  const saveBankDetails = async (
-    details: BankAccountDetails
-  ): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.saveBankDetails(details);
-    if (res.success && res.details) {
-      setSavedBankDetails(res.details);
-      playSound('click');
-      return { success: true };
+  const saveBankDetails = (details: BankAccountDetails) => {
+    setSavedBankDetails(details);
+    playSound('click');
+
+    // Persist to user account in Supabase
+    if (user) {
+      saveBankDetailsToSupabase(details, user.memberId, user.phoneNumber);
     }
-    return { success: false, error: res.error || 'Failed to save bank details' };
   };
 
-  const submitWithdrawal = async (
+  const submitWithdrawal = (
     amount: number,
     details: BankAccountDetails
-  ): Promise<{ success: boolean; error?: string; record?: WithdrawRecord }> => {
-    const res = await api.submitWithdrawal(amount, details);
-    if (!res.success || !res.record) {
-      return { success: false, error: res.error || 'Failed to submit withdrawal' };
+  ): { success: boolean; error?: string; record?: WithdrawRecord } => {
+    if (amount < 200) {
+      return { success: false, error: 'Minimum withdrawal amount is ₹200.' };
     }
-    if (typeof res.balance === 'number') {
-      setBalance(res.balance);
-      balanceRef.current = res.balance;
+    if (amount > 50000) {
+      return { success: false, error: 'Maximum single withdrawal limit is ₹50,000.' };
     }
-    setSavedBankDetails(details);
-    setWithdrawRecords((prev) => [res.record!, ...prev]);
+    if (balance < amount) {
+      return { success: false, error: 'Insufficient wallet balance for this withdrawal.' };
+    }
+    if (!details.accountHolderName.trim()) {
+      return { success: false, error: 'Please enter account holder name as per bank records.' };
+    }
+    if (!details.bankName.trim()) {
+      return { success: false, error: 'Please select or enter bank name.' };
+    }
+    if (!details.accountNumber.trim() || details.accountNumber.trim().length < 9) {
+      return { success: false, error: 'Please enter a valid bank account number (at least 9 digits).' };
+    }
+    if (!details.ifscCode.trim() || details.ifscCode.trim().length < 8) {
+      return { success: false, error: 'Please enter a valid IFSC code (e.g. SBIN0001234).' };
+    }
+
+    const nextBalance = balance - amount;
+    setBalance(nextBalance);
+    saveBankDetails(details);
+
+    const record: WithdrawRecord = {
+      id: 'WTH' + Math.floor(1000000 + Math.random() * 9000000),
+      amount,
+      actualAmount: amount,
+      fee: 0,
+      bankName: details.bankName,
+      accountNumberMasked: '**** ' + details.accountNumber.slice(-4),
+      accountHolderName: details.accountHolderName,
+      timestamp: Date.now(),
+      status: 'Processing',
+    };
+
+    setWithdrawRecords((prev) => [record, ...prev]);
     playSound('jackpot');
-    return { success: true, record: res.record };
+
+    // Persist to user account in Supabase
+    if (user) {
+      updateWalletBalanceInSupabase(user.memberId, user.phoneNumber, nextBalance);
+      recordWithdrawalInSupabase(record, user.memberId, user.phoneNumber);
+      saveBankDetailsToSupabase(details, user.memberId, user.phoneNumber);
+    }
+
+    // Simulate bank transfer completion after 8 seconds
+    setTimeout(() => {
+      setWithdrawRecords((prev) =>
+        prev.map((r) => (r.id === record.id ? { ...r, status: 'Completed' } : r))
+      );
+    }, 8000);
+
+    return { success: true, record };
   };
+
+  const userReferrals = useMemo(() => {
+    if (!user?.memberId) return [];
+    return referrals
+      .filter((r) => r.referrerMemberId === user.memberId || r.referrerPhone === user.phoneNumber)
+      .sort((a, b) => b.registeredAt - a.registeredAt);
+  }, [referrals, user?.memberId, user?.phoneNumber]);
+
+  const userReferralBonuses = useMemo(() => {
+    if (!user?.memberId) return [];
+    return referralMilestoneBonuses
+      .filter((b) => b.referrerMemberId === user.memberId || b.referrerPhone === user.phoneNumber)
+      .sort((a, b) => b.awardedAt - a.awardedAt);
+  }, [referralMilestoneBonuses, user?.memberId, user?.phoneNumber]);
 
   const referralStats: ReferralStats = useMemo(() => {
     const qualifiedCount = userReferrals.filter((r) => r.firstDepositCompleted).length;
@@ -846,8 +1931,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const milestonesCompleted = Math.floor(qualifiedCount / REFERRAL_MILESTONE_TARGET);
     const extraBonusEarned355 = userReferralBonuses.reduce((sum, b) => sum + b.amount, 0);
     const remainder = qualifiedCount % REFERRAL_MILESTONE_TARGET;
-    const progressToNext5 =
-      qualifiedCount > 0 && remainder === 0 ? REFERRAL_MILESTONE_TARGET : remainder;
+    const progressToNext5 = qualifiedCount > 0 && remainder === 0 ? REFERRAL_MILESTONE_TARGET : remainder;
 
     return {
       referralCode: user?.memberId || 'COB8892',
@@ -867,7 +1951,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         balance,
         history,
-        totalBetsCount,
         stats,
         recentlyPlayed,
         soundEnabled,
@@ -875,12 +1958,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         selectedGameId,
         user,
         isAuthenticated: !!user,
-        isAuthLoading,
         savedBankDetails,
         withdrawRecords,
         depositRecords,
-        refreshAccountState,
-        fetchPaginatedBets,
+        supabaseStatus,
+        refreshFromSupabase: performSupabaseSync,
         login,
         register,
         sendPasswordResetOtp,
@@ -894,14 +1976,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         submitWinGoBet,
         pendingWinGoBets,
         settleWinGoBets,
-        wingoRoundsByDuration,
-        wingoCurrentPeriods,
-        serverClockOffsetMs,
-        refreshWinGoState,
+        settledRoundOutcomes,
+        recordSettledRoundOutcome,
+        deposit,
         submitDepositRequest,
-        isAdminUnlocked,
-        unlockAdmin,
-        exitAdmin,
         approveDepositRequest,
         rejectDepositRequest,
         masterDepositRequests,
@@ -909,16 +1987,20 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         saveBankDetails,
         submitWithdrawal,
         winManagerEnabled,
+        toggleWinManager,
         setWinManagerEnabled,
         recordGameResult,
+        resetBalance,
+        clearHistory,
         playSound,
         dailyBonus,
         claimDailyBonus,
-        isClaimingDailyBonus,
         canClaimDailyBonus,
         timeUntilNextBonus,
         isDailyBonusModalOpen,
         setIsDailyBonusModalOpen,
+        masterPlayerBets,
+        refreshMasterPlayerBets,
         hasCompletedFirstDeposit,
         showFirstDepositPrompt,
         setShowFirstDepositPrompt,

@@ -92,7 +92,7 @@ export const DepositView: React.FC = () => {
     setSelectedAmount(parseInt(val, 10) || 0);
   };
 
-  const OFFICIAL_UPI_ID = '9067128082-1@nyes';
+  const OFFICIAL_UPI_ID = '7841812365@nyes';
 
   const handleCopyUpi = () => {
     playSound('click');
@@ -132,8 +132,7 @@ export const DepositView: React.FC = () => {
   };
 
   // Submit deposit request for Admin Approval
-  const handleSubmitDepositWithProof = async () => {
-    if (isProcessing) return;
+  const handleSubmitDepositWithProof = () => {
     setFormError('');
 
     if (currentAmountNum < 100) {
@@ -155,8 +154,8 @@ export const DepositView: React.FC = () => {
     playSound('click');
     setIsProcessing(true);
 
-    try {
-      const res = await submitDepositRequest({
+    setTimeout(() => {
+      const record = submitDepositRequest({
         amount: currentAmountNum,
         bonus: bonusAmount,
         method: selectedMethod.toUpperCase(),
@@ -164,24 +163,17 @@ export const DepositView: React.FC = () => {
         screenshot: screenshotData || undefined,
       });
 
-      if (!res.success || !res.record) {
-        setFormError(res.error || 'Failed to submit deposit request.');
-        playSound('loss');
-        return;
-      }
-
+      setIsProcessing(false);
       setSubmittedModal({
         isOpen: true,
-        record: res.record,
+        record,
       });
 
       // Clear input fields
       setUtrInput('');
       setScreenshotData('');
       setScreenshotFileName('');
-    } finally {
-      setIsProcessing(false);
-    }
+    }, 700);
   };
 
   return (
@@ -352,13 +344,13 @@ export const DepositView: React.FC = () => {
             {/* Scannable UPI QR Code */}
             <div className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 border border-slate-200">
               <div
-                onClick={() => setLightboxImage('/assets/aistudio/cobclub_qr-1_4d1fcac2.png')}
+                onClick={() => setLightboxImage('/assets/aistudio/cobclub_upi_qr_b5e37b20.png')}
                 className="w-56 sm:w-64 rounded-2xl bg-white p-2 border border-slate-200 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
                 title="Click to enlarge QR Code"
               >
                 <img
-                  src="/assets/aistudio/cobclub_qr-1_4d1fcac2.png"
-                  alt="COBCLUB Official UPI QR Code - 9067128082-1@nyes"
+                  src="/assets/aistudio/cobclub_upi_qr_b5e37b20.png"
+                  alt="COBCLUB Official UPI QR Code - 7841812365@nyes"
                   className="w-full h-auto rounded-xl object-contain"
                 />
               </div>
