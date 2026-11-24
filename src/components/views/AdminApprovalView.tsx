@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft,
   Crown,
@@ -28,17 +28,20 @@ export const AdminApprovalView: React.FC = () => {
     refreshMasterDeposits,
     playSound,
     setActiveView,
+    isAdminUnlocked,
+    unlockAdmin,
+    exitAdmin,
   } = useGame();
 
-  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(() => {
-    return typeof window !== 'undefined' && sessionStorage.getItem('cobclub_admin_session') === 'true';
-  });
   const [pinEntry, setPinEntry] = useState('');
   const [pinError, setPinError] = useState('');
+  const [isUnlocking, setIsUnlocking] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'pending' | 'completed' | 'rejected' | 'all'>('pending');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [processingDepositId, setProcessingDepositId] = useState<string | null>(null);
+  const [isRejecting, setIsRejecting] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
   const [rejectDialog, setRejectDialog] = useState<{
@@ -55,34 +58,44 @@ export const AdminApprovalView: React.FC = () => {
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (isAdminUnlocked) {
+      refreshMasterDeposits();
+    }
+  }, [isAdminUnlocked, refreshMasterDeposits]);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const handleUnlockAdmin = (e?: React.FormEvent) => {
+  const handleUnlockAdmin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (isUnlocking) return;
     const pin = pinEntry.trim();
-    if (pin === 'Sweta@1212') {
-      try {
-        sessionStorage.setItem('cobclub_admin_session', 'true');
-      } catch {}
-      setIsAdminUnlocked(true);
-      setPinEntry('');
-      setPinError('');
-      playSound('jackpot');
-    } else {
-      setPinError('Access denied. Incorrect password.');
-      playSound('loss');
+    if (!pin) {
+      setPinError('Please enter password.');
+      return;
+    }
+    setIsUnlocking(true);
+    try {
+      const res = await unlockAdmin(pin);
+      if (res.success) {
+        setPinEntry('');
+        setPinError('');
+        playSound('jackpot');
+      } else {
+        setPinError(res.error || 'Access denied. Incorrect password.');
+        playSound('loss');
+      }
+    } finally {
+      setIsUnlocking(false);
     }
   };
 
   const handleExitAdmin = () => {
     playSound('click');
-    try {
-      sessionStorage.removeItem('cobclub_admin_session');
-    } catch {}
-    setIsAdminUnlocked(false);
+    exitAdmin();
     setActiveView('profile');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -93,13 +106,22 @@ export const AdminApprovalView: React.FC = () => {
   const rejectedDeposits = masterDepositRequests.filter((d) => d.status === 'Rejected');
   const totalApprovedVolume = approvedDeposits.reduce((acc, d) => acc + d.totalCredit, 0);
 
-  const handleApprove = (req: DepositRecord) => {
-    playSound('jackpot');
-    const res = approveDepositRequest(req.id);
-    if (res.success) {
-      showToast(`Deposit ${req.id} approved! ₹${req.totalCredit.toLocaleString()} points added to player ${req.memberId || ''}.`);
-    } else {
-      showToast(res.error || 'Failed to approve deposit.');
+  const handleApprove = async (req: DepositRecord) => {
+    if (processingDepositId) return;
+    setProcessingDepositId(req.id);
+    try {
+      const res = await approveDepositRequest(req.id);
+      if (res.success) {
+        playSound('jackpot');
+        showToast(
+          `Deposit ${req.id} approved! ₹${req.totalCredit.toLocaleString()} points added to player ${req.memberId || ''}.`
+        );
+      } else {
+        playSound('loss');
+        showToast(res.error || 'Failed to approve deposit.');
+      }
+    } finally {
+      setProcessingDepositId(null);
     }
   };
 
@@ -113,21 +135,32 @@ export const AdminApprovalView: React.FC = () => {
     });
   };
 
-  const handleConfirmReject = () => {
-    playSound('loss');
-    rejectDepositRequest(rejectDialog.depositId, rejectDialog.reason);
-    showToast(`Deposit ${rejectDialog.depositId} has been rejected.`);
-    setRejectDialog({ isOpen: false, depositId: '', memberId: '', reason: '' });
+  const handleConfirmReject = async () => {
+    if (isRejecting) return;
+    setIsRejecting(true);
+    try {
+      const res = await rejectDepositRequest(rejectDialog.depositId, rejectDialog.reason);
+      if (res.success) {
+        playSound('loss');
+        showToast(`Deposit ${rejectDialog.depositId} has been rejected.`);
+        setRejectDialog({ isOpen: false, depositId: '', memberId: '', reason: '' });
+      } else {
+        showToast(res.error || 'Failed to reject deposit.');
+      }
+    } finally {
+      setIsRejecting(false);
+    }
   };
 
   const handleSyncCloud = async () => {
     playSound('click');
     setIsSyncing(true);
-    await refreshMasterDeposits();
-    setTimeout(() => {
-      setIsSyncing(false);
+    try {
+      await refreshMasterDeposits();
       showToast('Cloud deposits synced successfully!');
-    }, 600);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   // Filtered list
@@ -190,9 +223,10 @@ export const AdminApprovalView: React.FC = () => {
 
             <button
               type="submit"
-              className="w-full py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm uppercase tracking-wider shadow-md transition-all cursor-pointer active:scale-98"
+              disabled={isUnlocking}
+              className="w-full py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm uppercase tracking-wider shadow-md transition-all cursor-pointer active:scale-98 disabled:opacity-50"
             >
-              Unlock Portal
+              {isUnlocking ? 'Unlocking...' : 'Unlock Portal'}
             </button>
 
             <button
@@ -607,17 +641,23 @@ export const AdminApprovalView: React.FC = () => {
                 <div className="pt-2 flex flex-col sm:flex-row items-center gap-2">
                   <button
                     type="button"
+                    disabled={processingDepositId === req.id}
                     onClick={() => handleApprove(req)}
-                    className="w-full sm:flex-1 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm uppercase tracking-wider shadow-md shadow-emerald-600/25 flex items-center justify-center gap-2 cursor-pointer active:scale-98 transition-all"
+                    className="w-full sm:flex-1 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm uppercase tracking-wider shadow-md shadow-emerald-600/25 flex items-center justify-center gap-2 cursor-pointer active:scale-98 transition-all disabled:opacity-50"
                   >
                     <Check className="w-4 h-4 stroke-[3]" />
-                    <span>Approve &amp; Add ₹{req.totalCredit.toLocaleString()} Points to Player</span>
+                    <span>
+                      {processingDepositId === req.id
+                        ? 'Approving...'
+                        : `Approve & Add ₹${req.totalCredit.toLocaleString()} Points to Player`}
+                    </span>
                   </button>
 
                   <button
                     type="button"
+                    disabled={processingDepositId === req.id}
                     onClick={() => handleOpenReject(req)}
-                    className="w-full sm:w-auto py-3.5 px-4 rounded-2xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                    className="w-full sm:w-auto py-3.5 px-4 rounded-2xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
                   >
                     <X className="w-4 h-4" />
                     <span>Reject Deposit</span>
@@ -721,10 +761,11 @@ export const AdminApprovalView: React.FC = () => {
               </button>
               <button
                 type="button"
+                disabled={isRejecting}
                 onClick={handleConfirmReject}
-                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-black text-xs cursor-pointer transition-colors shadow-xs"
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-black text-xs cursor-pointer transition-colors shadow-xs disabled:opacity-50"
               >
-                Confirm Reject
+                {isRejecting ? 'Rejecting...' : 'Confirm Reject'}
               </button>
             </div>
           </div>

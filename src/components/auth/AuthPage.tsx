@@ -70,25 +70,28 @@ export const AuthPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [otpTimer]);
 
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return;
     setErrorMessage(null);
     setOtpSuccessMessage(null);
     playSound('click');
 
     setIsLoading(true);
-    setTimeout(() => {
-      const res = login(signInNumber, signInPassword);
-      setIsLoading(false);
+    try {
+      const res = await login(signInNumber, signInPassword);
       if (!res.success) {
         setErrorMessage(res.error || 'Failed to sign in. Please check your credentials.');
         playSound('loss');
       }
-    }, 400);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return;
     setErrorMessage(null);
     setOtpSuccessMessage(null);
     playSound('click');
@@ -99,25 +102,26 @@ export const AuthPage: React.FC = () => {
     }
 
     setIsLoading(true);
-    setTimeout(() => {
-      const res = register(regNumber, regPassword, regConfirmPassword, regInviteCode);
-      setIsLoading(false);
+    try {
+      const res = await register(regNumber, regPassword, regConfirmPassword, regInviteCode);
       if (!res.success) {
         setErrorMessage(res.error || 'Registration failed.');
         playSound('loss');
       }
-    }, 500);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleSendOtp = () => {
+  const handleSendOtp = async () => {
+    if (isSendingOtp) return;
     setErrorMessage(null);
     setOtpSuccessMessage(null);
     playSound('click');
 
     setIsSendingOtp(true);
-    setTimeout(() => {
-      setIsSendingOtp(false);
-      const res = sendPasswordResetOtp(forgotNumber);
+    try {
+      const res = await sendPasswordResetOtp(forgotNumber);
       if (!res.success) {
         setErrorMessage(res.error || 'Failed to send OTP.');
         playSound('loss');
@@ -127,11 +131,14 @@ export const AuthPage: React.FC = () => {
         setOtpSuccessMessage(`OTP sent successfully to +91 ${forgotNumber.replace(/\D/g, '')}!`);
         playSound('win');
       }
-    }, 350);
+    } finally {
+      setIsSendingOtp(false);
+    }
   };
 
-  const handleResetPassword = (e: React.FormEvent) => {
+  const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return;
     setErrorMessage(null);
     playSound('click');
 
@@ -154,9 +161,13 @@ export const AuthPage: React.FC = () => {
     }
 
     setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      const res = resetPasswordWithOtp(forgotNumber, forgotOtp, forgotNewPassword, forgotConfirmPassword);
+    try {
+      const res = await resetPasswordWithOtp(
+        forgotNumber,
+        forgotOtp,
+        forgotNewPassword,
+        forgotConfirmPassword
+      );
       if (!res.success) {
         setErrorMessage(res.error || 'Failed to reset password.');
         playSound('loss');
@@ -168,10 +179,14 @@ export const AuthPage: React.FC = () => {
         setForgotOtp('');
         setForgotNewPassword('');
         setForgotConfirmPassword('');
-        setOtpSuccessMessage('Password reset successfully! You can now sign in with your new password.');
+        setOtpSuccessMessage(
+          'Password reset successfully! You can now sign in with your new password.'
+        );
         playSound('jackpot');
       }
-    }, 450);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

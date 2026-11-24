@@ -35,6 +35,8 @@ export const deterministicHash = (seed1: number, seed2: number, seed3: number = 
   return h;
 };
 
+const IST_OFFSET_MS = 19800 * 1000;
+
 /**
  * Generates continuous period issue string from timestamp: YYYYMMDD + prefix + roundOfDay (4 digits)
  */
@@ -43,11 +45,12 @@ export const getContinuousPeriodForGame = (
   timeMs: number = Date.now(),
   durationSec: number = CONTINUOUS_ROUND_DURATION_SEC
 ): string => {
-  const date = new Date(timeMs);
-  const yyyy = date.getFullYear().toString();
-  const mm = (date.getMonth() + 1).toString().padStart(2, '0');
-  const dd = date.getDate().toString().padStart(2, '0');
-  const secondsSinceMidnight = date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
+  const date = new Date(timeMs + IST_OFFSET_MS);
+  const yyyy = date.getUTCFullYear().toString();
+  const mm = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+  const dd = date.getUTCDate().toString().padStart(2, '0');
+  const secondsSinceMidnight =
+    date.getUTCHours() * 3600 + date.getUTCMinutes() * 60 + date.getUTCSeconds();
   const roundOfDay = Math.floor(secondsSinceMidnight / durationSec) + 1;
   const prefix = GAME_PERIOD_PREFIXES[gameId] || '30';
   return `${yyyy}${mm}${dd}${prefix}${roundOfDay.toString().padStart(4, '0')}`;
@@ -67,7 +70,7 @@ export const getContinuousRemainingSeconds = (durationSec: number = CONTINUOUS_R
  */
 export const parseContinuousPeriod = (
   period: string,
-  gameId: GameId,
+  _gameId: GameId,
   durationSec: number = CONTINUOUS_ROUND_DURATION_SEC
 ): { roundIdx: number; roundStartTime: number; roundEndTime: number } => {
   try {
@@ -77,7 +80,7 @@ export const parseContinuousPeriod = (
     const roundPart = period.slice(period.length - 4);
     const roundOfDay = parseInt(roundPart, 10);
 
-    const startOfDayMs = new Date(yyyy, mm, dd, 0, 0, 0, 0).getTime();
+    const startOfDayMs = Date.UTC(yyyy, mm, dd, 0, 0, 0, 0) - IST_OFFSET_MS;
     const secondsSinceMidnight = (roundOfDay - 1) * durationSec;
     const roundStartTime = startOfDayMs + secondsSinceMidnight * 1000;
     const roundEndTime = roundStartTime + durationSec * 1000;

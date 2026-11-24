@@ -35,21 +35,24 @@ export const HomeView: React.FC = () => {
     setWinManagerEnabled,
     masterDepositRequests,
     referralStats,
+    isAdminUnlocked,
+    unlockAdmin,
   } = useGame();
 
   const [showPassModal, setShowPassModal] = useState(false);
   const [passInput, setPassInput] = useState('');
   const [passError, setPassError] = useState('');
+  const [isVerifyingVolume, setIsVerifyingVolume] = useState(false);
 
   // Admin Authentication State
   const [showAdminPinModal, setShowAdminPinModal] = useState(false);
   const [adminPinInput, setAdminPinInput] = useState('');
   const [adminPinError, setAdminPinError] = useState('');
+  const [isVerifyingAdmin, setIsVerifyingAdmin] = useState(false);
 
   const handleAdminClick = () => {
     playSound('click');
-    const isAuth = typeof window !== 'undefined' && sessionStorage.getItem('cobclub_admin_session') === 'true';
-    if (isAuth) {
+    if (isAdminUnlocked) {
       setActiveView('admin');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
@@ -59,22 +62,30 @@ export const HomeView: React.FC = () => {
     }
   };
 
-  const handleAdminPinSubmit = (e?: React.FormEvent) => {
+  const handleAdminPinSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (isVerifyingAdmin) return;
     const pin = adminPinInput.trim();
-    if (pin === 'Sweta@1212') {
-      try {
-        sessionStorage.setItem('cobclub_admin_session', 'true');
-      } catch {}
-      setShowAdminPinModal(false);
-      setAdminPinInput('');
-      setAdminPinError('');
-      playSound('win');
-      setActiveView('admin');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      setAdminPinError('Access denied. Incorrect password.');
-      playSound('loss');
+    if (!pin) {
+      setAdminPinError('Please enter password.');
+      return;
+    }
+    setIsVerifyingAdmin(true);
+    try {
+      const res = await unlockAdmin(pin);
+      if (res.success) {
+        setShowAdminPinModal(false);
+        setAdminPinInput('');
+        setAdminPinError('');
+        playSound('win');
+        setActiveView('admin');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        setAdminPinError(res.error || 'Access denied. Incorrect password.');
+        playSound('loss');
+      }
+    } finally {
+      setIsVerifyingAdmin(false);
     }
   };
 
@@ -89,17 +100,29 @@ export const HomeView: React.FC = () => {
     }
   };
 
-  const handlePassSubmit = (e?: React.FormEvent) => {
+  const handlePassSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (passInput.trim() === 'Sweta@1212') {
-      setWinManagerEnabled(true);
-      setShowPassModal(false);
-      setPassInput('');
-      setPassError('');
-      playSound('win');
-    } else {
-      setPassError('Access denied. Incorrect password.');
-      playSound('loss');
+    if (isVerifyingVolume) return;
+    const pin = passInput.trim();
+    if (!pin) {
+      setPassError('Please enter password.');
+      return;
+    }
+    setIsVerifyingVolume(true);
+    try {
+      const res = await unlockAdmin(pin);
+      if (res.success) {
+        setWinManagerEnabled(true);
+        setShowPassModal(false);
+        setPassInput('');
+        setPassError('');
+        playSound('win');
+      } else {
+        setPassError(res.error || 'Access denied. Incorrect password.');
+        playSound('loss');
+      }
+    } finally {
+      setIsVerifyingVolume(false);
     }
   };
 
@@ -660,9 +683,10 @@ export const HomeView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-colors cursor-pointer shadow-xs"
+                  disabled={isVerifyingAdmin}
+                  className="flex-1 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-colors cursor-pointer shadow-xs disabled:opacity-50"
                 >
-                  Unlock
+                  {isVerifyingAdmin ? 'Verifying...' : 'Unlock'}
                 </button>
               </div>
             </form>
@@ -730,9 +754,10 @@ export const HomeView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs"
+                  disabled={isVerifyingVolume}
+                  className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs disabled:opacity-50"
                 >
-                  Confirm
+                  {isVerifyingVolume ? 'Verifying...' : 'Confirm'}
                 </button>
               </div>
             </form>

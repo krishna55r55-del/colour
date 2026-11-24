@@ -216,15 +216,19 @@ export const getPeriodPrefix = (durationSec: number): string => {
   }
 };
 
+const IST_OFFSET_MS = 19800 * 1000; // UTC+05:30 (divisible by 30s, 60s, 180s, 300s)
+
 /**
  * Generate standard continuous period issue string from timestamp: YYYYMMDD + prefix + roundOfDay (4 digits)
+ * Uses canonical UTC+05:30 so server and all clients always agree on the exact period ID.
  */
 export const getPeriodForTime = (timeMs: number, durationSec: number = 30): string => {
-  const date = new Date(timeMs);
-  const yyyy = date.getFullYear().toString();
-  const mm = (date.getMonth() + 1).toString().padStart(2, '0');
-  const dd = date.getDate().toString().padStart(2, '0');
-  const secondsSinceMidnight = date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
+  const istDate = new Date(timeMs + IST_OFFSET_MS);
+  const yyyy = istDate.getUTCFullYear().toString();
+  const mm = (istDate.getUTCMonth() + 1).toString().padStart(2, '0');
+  const dd = istDate.getUTCDate().toString().padStart(2, '0');
+  const secondsSinceMidnight =
+    istDate.getUTCHours() * 3600 + istDate.getUTCMinutes() * 60 + istDate.getUTCSeconds();
   const roundOfDay = Math.floor(secondsSinceMidnight / durationSec) + 1;
   const prefix = getPeriodPrefix(durationSec);
   return `${yyyy}${mm}${dd}${prefix}${roundOfDay.toString().padStart(4, '0')}`;
@@ -233,8 +237,8 @@ export const getPeriodForTime = (timeMs: number, durationSec: number = 30): stri
 /**
  * Calculate exact remaining seconds in continuous cycle for any duration
  */
-export const getContinuousRemainingSeconds = (durationSec: number): number => {
-  const secInCycle = Math.floor((Date.now() / 1000) % durationSec);
+export const getContinuousRemainingSeconds = (durationSec: number, nowMs: number = Date.now()): number => {
+  const secInCycle = Math.floor((nowMs / 1000) % durationSec);
   const rem = durationSec - secInCycle;
   return rem === 0 ? durationSec : rem;
 };
@@ -252,9 +256,13 @@ export const parsePeriodToTimestamp = (
     const dd = parseInt(period.slice(6, 8), 10);
     const roundOfDay = parseInt(period.slice(10, 14), 10);
 
-    const startOfDayMs = new Date(yyyy, mm, dd, 0, 0, 0, 0).getTime();
+    if (isNaN(yyyy) || isNaN(mm) || isNaN(dd) || isNaN(roundOfDay)) {
+      throw new Error('Invalid period format');
+    }
+
+    const startOfDayUtcMs = Date.UTC(yyyy, mm, dd, 0, 0, 0, 0) - IST_OFFSET_MS;
     const secondsSinceMidnight = (roundOfDay - 1) * durationSec;
-    const roundStartTime = startOfDayMs + secondsSinceMidnight * 1000;
+    const roundStartTime = startOfDayUtcMs + secondsSinceMidnight * 1000;
     const roundEndTime = roundStartTime + durationSec * 1000;
     const roundIdx = Math.floor(roundStartTime / (durationSec * 1000));
 
