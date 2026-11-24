@@ -71,6 +71,10 @@ export function hasAdminToken(): boolean {
   return Boolean(inMemoryAdminToken);
 }
 
+const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || '')
+  .trim()
+  .replace(/\/+$/, '');
+
 async function apiRequest<T = any>(
   url: string,
   options: RequestInit = {},
@@ -91,9 +95,11 @@ async function apiRequest<T = any>(
     headers['X-Admin-Token'] = inMemoryAdminToken;
   }
 
+  const targetUrl = API_BASE_URL && url.startsWith('/') ? `${API_BASE_URL}${url}` : url;
+
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetch(targetUrl, {
       ...options,
       credentials: 'include',
       headers,
@@ -107,21 +113,31 @@ async function apiRequest<T = any>(
 
   const text = await res.text();
   let data: any = {};
+  let parsedJson = false;
   try {
-    data = text ? JSON.parse(text) : {};
+    if (text) {
+      data = JSON.parse(text);
+      parsedJson = true;
+    }
   } catch {
-    data = {
-      success: false,
-      error: `Server returned an unexpected response (${res.status}).`,
-    };
+    data = {};
   }
+
+  const hasStructuredApiError = parsedJson && typeof data?.error === 'string' && data.error.length > 0;
 
   if (!res.ok) {
     if (data.success === undefined) {
       data.success = false;
     }
-    if (!data.error) {
-      data.error = `Server error (${res.status}). Please try again.`;
+    if (!hasStructuredApiError) {
+      if (res.status === 404) {
+        data.error =
+          'Backend API not found (404). Static hosting (such as Netlify) does not run the Node/SQLite server—please open the full-stack app URL or set VITE_API_BASE_URL to your hosted backend.';
+      } else if (!parsedJson && text) {
+        data.error = `Server returned an unexpected response (${res.status}).`;
+      } else {
+        data.error = `Server error (${res.status}). Please try again.`;
+      }
     }
   }
   return data as T;

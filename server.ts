@@ -113,11 +113,33 @@ function clearSessionCookie(req: Request, res: Response) {
   }
 }
 
+function getAllowedCorsOrigins(): Set<string> {
+  const origins = new Set<string>(['https://cobclub.netlify.app']);
+  const rawList = String(process.env.CORS_ORIGINS || '').trim();
+  if (rawList) {
+    for (const item of rawList.split(',')) {
+      const cleaned = item.trim().replace(/\/+$/, '');
+      if (cleaned) origins.add(cleaned);
+    }
+  }
+  const appUrl = String(process.env.APP_URL || '').trim().replace(/\/+$/, '');
+  if (appUrl && appUrl !== 'MY_APP_URL') {
+    origins.add(appUrl);
+  }
+  return origins;
+}
+
+function isAllowedCrossOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+  return getAllowedCorsOrigins().has(origin.replace(/\/+$/, ''));
+}
+
 function verifyCsrfOrOrigin(req: Request): boolean {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return true;
   if (req.headers['x-requested-with'] === 'XMLHttpRequest') return true;
   if (req.headers.authorization?.startsWith('Bearer ')) return true;
   const origin = req.headers.origin;
+  if (isAllowedCrossOrigin(origin)) return true;
   const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');
   if (origin && host) {
     try {
@@ -635,6 +657,25 @@ async function startServer() {
   const app = express();
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '12mb' }));
+
+  app.use('/api', (req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && isAllowedCrossOrigin(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization, X-Requested-With, X-Admin-Token'
+      );
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    }
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
 
   // Background settlement & official round archiving every 1s
   ensureRecentCompletedRounds(Date.now(), 30);
@@ -1994,6 +2035,10 @@ async function startServer() {
       return;
     }
     res.json({ success: true });
+  });
+
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ success: false, error: 'API endpoint not found' });
   });
 
   // -------- Frontend Vite / Static Integration --------
