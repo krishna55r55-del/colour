@@ -150,7 +150,7 @@ export const api = {
     }),
 
   sendOtp: (phoneNumber: string) =>
-    apiRequest<{ success: boolean; otp?: string; error?: string }>('/api/auth/send-otp', {
+    apiRequest<{ success: boolean; message?: string; error?: string }>('/api/auth/send-otp', {
       method: 'POST',
       body: JSON.stringify({ phoneNumber }),
     }),

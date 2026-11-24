@@ -66,7 +66,7 @@ interface GameContextType {
   ) => Promise<{ success: boolean; error?: string }>;
   sendPasswordResetOtp: (
     phoneNumber: string
-  ) => Promise<{ success: boolean; otp?: string; error?: string }>;
+  ) => Promise<{ success: boolean; message?: string; error?: string }>;
   resetPasswordWithOtp: (
     phoneNumber: string,
     otp: string,
@@ -514,7 +514,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const sendPasswordResetOtp = async (
     phoneNumber: string
-  ): Promise<{ success: boolean; otp?: string; error?: string }> => {
+  ): Promise<{ success: boolean; message?: string; error?: string }> => {
     const res = await api.sendOtp(phoneNumber);
     if (res.success) playSound('tick');
     return res;

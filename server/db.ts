@@ -43,7 +43,10 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS password_reset_otps (
     phone_number TEXT PRIMARY KEY,
     otp TEXT NOT NULL,
-    expires_at INTEGER NOT NULL
+    expires_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_sent_at INTEGER NOT NULL DEFAULT 0,
+    provider TEXT NOT NULL DEFAULT 'sms'
   );
 
   CREATE TABLE IF NOT EXISTS daily_bonuses (
@@ -173,6 +176,22 @@ db.exec(`
     value TEXT NOT NULL
   );
 `);
+
+// Safely migrate existing databases if password_reset_otps lacks newer columns
+const otpCols = new Set(
+  (db.prepare('PRAGMA table_info(password_reset_otps)').all() as Array<{ name: string }>).map(
+    (c) => c.name
+  )
+);
+if (!otpCols.has('attempts')) {
+  db.exec('ALTER TABLE password_reset_otps ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
+}
+if (!otpCols.has('last_sent_at')) {
+  db.exec('ALTER TABLE password_reset_otps ADD COLUMN last_sent_at INTEGER NOT NULL DEFAULT 0');
+}
+if (!otpCols.has('provider')) {
+  db.exec("ALTER TABLE password_reset_otps ADD COLUMN provider TEXT NOT NULL DEFAULT 'sms'");
+}
 
 export function runInTransaction<T>(fn: () => T): T {
   db.exec('BEGIN IMMEDIATE');

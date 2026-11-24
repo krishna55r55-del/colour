@@ -52,7 +52,6 @@ export const AuthPage: React.FC = () => {
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
   const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
   const [showForgotConfirmPassword, setShowForgotConfirmPassword] = useState(false);
-  const [otpSentCode, setOtpSentCode] = useState<string | null>(null);
   const [otpTimer, setOtpTimer] = useState(0);
   const [otpSuccessMessage, setOtpSuccessMessage] = useState<string | null>(null);
   const [isSendingOtp, setIsSendingOtp] = useState(false);
@@ -123,12 +122,14 @@ export const AuthPage: React.FC = () => {
     try {
       const res = await sendPasswordResetOtp(forgotNumber);
       if (!res.success) {
-        setErrorMessage(res.error || 'Failed to send OTP.');
+        setErrorMessage(res.error || 'Failed to send SMS OTP.');
         playSound('loss');
       } else {
-        setOtpSentCode(res.otp || null);
         setOtpTimer(60);
-        setOtpSuccessMessage(`OTP sent successfully to +91 ${forgotNumber.replace(/\D/g, '')}!`);
+        setOtpSuccessMessage(
+          res.message ||
+            `SMS verification OTP sent to +91 ${forgotNumber.replace(/\D/g, '')}. Please check your messages.`
+        );
         playSound('win');
       }
     } finally {
@@ -175,7 +176,6 @@ export const AuthPage: React.FC = () => {
         setSignInNumber(forgotNumber.trim().replace(/\D/g, ''));
         setSignInPassword(forgotNewPassword);
         setActiveTab('signin');
-        setOtpSentCode(null);
         setForgotOtp('');
         setForgotNewPassword('');
         setForgotConfirmPassword('');
@@ -569,32 +569,7 @@ export const AuthPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* OTP Simulation Notification Badge */}
-              {otpSentCode && (
-                <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center justify-between gap-2 animate-in fade-in duration-200">
-                  <div className="flex items-center gap-2">
-                    <Key className="w-4 h-4 text-amber-600 shrink-0" />
-                    <div>
-                      <span className="font-bold block">Verification OTP:</span>
-                      <span className="font-mono font-black text-sm tracking-widest text-amber-800">
-                        {otpSentCode}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      playSound('click');
-                      setForgotOtp(otpSentCode);
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-amber-200 hover:bg-amber-300 text-amber-900 font-bold text-[11px] transition-colors cursor-pointer"
-                  >
-                    Autofill OTP
-                  </button>
-                </div>
-              )}
-
-              {/* OTP Code Input */}
+              {/* Real SMS OTP Input Notice */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                   6-Digit OTP Code

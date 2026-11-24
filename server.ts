@@ -785,7 +785,238 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post('/api/auth/send-otp', (req, res) => {
+  // -------- Real SMS OTP Helpers --------
+  const OTP_TTL_MS = 5 * 60 * 1000;
+  const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+  const OTP_MAX_ATTEMPTS = 5;
+
+  function formatPhoneForSms(rawDigits: string): { national10: string; e164: string } {
+    const digits = rawDigits.replace(/\D/g, '');
+    const national10 = digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits.slice(-10);
+    const e164 =
+      digits.length === 10
+        ? `+91${digits}`
+        : digits.length === 12 && digits.startsWith('91')
+        ? `+${digits}`
+        : `+${digits}`;
+    return { national10, e164 };
+  }
+
+  function getConfiguredSmsProvider():
+    | 'twilio_verify'
+    | 'twilio_sms'
+    | 'fast2sms'
+    | 'msg91'
+    | 'twofactor'
+    | null {
+    const twilioSid = (process.env.TWILIO_ACCOUNT_SID || '').trim();
+    const twilioToken = (process.env.TWILIO_AUTH_TOKEN || '').trim();
+    const twilioVerifySid = (process.env.TWILIO_VERIFY_SERVICE_SID || '').trim();
+    const twilioFrom = (process.env.TWILIO_FROM_NUMBER || '').trim();
+    if (twilioSid && twilioToken && twilioVerifySid) return 'twilio_verify';
+    if (twilioSid && twilioToken && twilioFrom) return 'twilio_sms';
+    if ((process.env.FAST2SMS_API_KEY || '').trim()) return 'fast2sms';
+    if ((process.env.MSG91_AUTH_KEY || '').trim() && (process.env.MSG91_TEMPLATE_ID || '').trim()) return 'msg91';
+    if ((process.env.TWOFACTOR_API_KEY || '').trim()) return 'twofactor';
+    return null;
+  }
+
+  async function dispatchRealSmsOtp(phoneDigits: string): Promise<{
+    ok: boolean;
+    provider?: string;
+    otpToStore?: string;
+    error?: string;
+    status?: number;
+  }> {
+    const provider = getConfiguredSmsProvider();
+    if (!provider) {
+      return {
+        ok: false,
+        status: 503,
+        error:
+          'Real SMS OTP service is not configured on the server. Add your SMS provider credentials (Twilio, Fast2SMS, MSG91, or 2Factor) in Settings -> Secrets to deliver SMS OTPs.',
+      };
+    }
+
+    const { national10, e164 } = formatPhoneForSms(phoneDigits);
+    const otp = String(crypto.randomInt(100000, 1000000));
+
+    try {
+      if (provider === 'twilio_verify') {
+        const sid = process.env.TWILIO_ACCOUNT_SID!.trim();
+        const token = process.env.TWILIO_AUTH_TOKEN!.trim();
+        const verifySid = process.env.TWILIO_VERIFY_SERVICE_SID!.trim();
+        const authHeader = 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64');
+        const body = new URLSearchParams({ To: e164, Channel: 'sms' });
+        const resp = await fetch(`https://verify.twilio.com/v2/Services/${encodeURIComponent(verifySid)}/Verifications`, {
+          method: 'POST',
+          headers: {
+            Authorization: authHeader,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: body.toString(),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!resp.ok) {
+          const errData = (await resp.json().catch(() => ({}))) as any;
+          return {
+            ok: false,
+            status: 502,
+            error: errData?.message || 'SMS verification service could not send OTP. Please try again.',
+          };
+        }
+        return { ok: true, provider, otpToStore: 'TWILIO_VERIFY' };
+      }
+
+      if (provider === 'twilio_sms') {
+        const sid = process.env.TWILIO_ACCOUNT_SID!.trim();
+        const token = process.env.TWILIO_AUTH_TOKEN!.trim();
+        const from = process.env.TWILIO_FROM_NUMBER!.trim();
+        const authHeader = 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64');
+        const body = new URLSearchParams({
+          From: from,
+          To: e164,
+          Body: `Your COBCLUB password reset OTP is ${otp}. Valid for 5 minutes. Do not share it with anyone.`,
+        });
+        const resp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/Messages.json`, {
+          method: 'POST',
+          headers: {
+            Authorization: authHeader,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: body.toString(),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!resp.ok) {
+          const errData = (await resp.json().catch(() => ({}))) as any;
+          return {
+            ok: false,
+            status: 502,
+            error: errData?.message || 'Twilio SMS gateway failed to send OTP. Please check recipient number.',
+          };
+        }
+        return { ok: true, provider, otpToStore: hashPassword(otp) };
+      }
+
+      if (provider === 'fast2sms') {
+        const apiKey = process.env.FAST2SMS_API_KEY!.trim();
+        const route = (process.env.FAST2SMS_ROUTE || 'otp').trim();
+        const payload =
+          route === 'q'
+            ? {
+                route: 'q',
+                message: `Your COBCLUB password reset OTP is ${otp}. Valid for 5 minutes.`,
+                numbers: national10,
+              }
+            : {
+                route: 'otp',
+                variables_values: otp,
+                numbers: national10,
+              };
+        const resp = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+          method: 'POST',
+          headers: {
+            authorization: apiKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(10000),
+        });
+        const data = (await resp.json().catch(() => ({}))) as any;
+        if (!resp.ok || data?.return === false) {
+          return {
+            ok: false,
+            status: 502,
+            error: data?.message?.[0] || data?.message || 'Fast2SMS failed to send OTP.',
+          };
+        }
+        return { ok: true, provider, otpToStore: hashPassword(otp) };
+      }
+
+      if (provider === 'msg91') {
+        const authKey = process.env.MSG91_AUTH_KEY!.trim();
+        const templateId = process.env.MSG91_TEMPLATE_ID!.trim();
+        const url = `https://control.msg91.com/api/v5/otp?template_id=${encodeURIComponent(
+          templateId
+        )}&mobile=${encodeURIComponent('91' + national10)}&otp=${encodeURIComponent(otp)}`;
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            authkey: authKey,
+            'Content-Type': 'application/json',
+          },
+          signal: AbortSignal.timeout(10000),
+        });
+        const data = (await resp.json().catch(() => ({}))) as any;
+        if (!resp.ok || data?.type === 'error') {
+          return {
+            ok: false,
+            status: 502,
+            error: data?.message || 'MSG91 failed to send OTP.',
+          };
+        }
+        return { ok: true, provider, otpToStore: hashPassword(otp) };
+      }
+
+      // provider === 'twofactor'
+      const apiKey = process.env.TWOFACTOR_API_KEY!.trim();
+      const url = `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(
+        '+91' + national10
+      )}/${encodeURIComponent(otp)}`;
+      const resp = await fetch(url, {
+        method: 'GET',
+        signal: AbortSignal.timeout(10000),
+      });
+      const data = (await resp.json().catch(() => ({}))) as any;
+      if (!resp.ok || data?.Status !== 'Success') {
+        return {
+          ok: false,
+          status: 502,
+          error: data?.Details || 'SMS gateway failed to send OTP.',
+        };
+      }
+      return { ok: true, provider, otpToStore: hashPassword(otp) };
+    } catch (err) {
+      console.error('SMS OTP dispatch error:', err);
+      return {
+        ok: false,
+        status: 502,
+        error: 'Unable to reach SMS gateway right now. Please try again shortly.',
+      };
+    }
+  }
+
+  async function checkTwilioVerifyOtp(phoneDigits: string, code: string): Promise<boolean> {
+    const sid = (process.env.TWILIO_ACCOUNT_SID || '').trim();
+    const token = (process.env.TWILIO_AUTH_TOKEN || '').trim();
+    const verifySid = (process.env.TWILIO_VERIFY_SERVICE_SID || '').trim();
+    if (!sid || !token || !verifySid) return false;
+
+    const { e164 } = formatPhoneForSms(phoneDigits);
+    const authHeader = 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64');
+    const body = new URLSearchParams({ To: e164, Code: code });
+    try {
+      const resp = await fetch(
+        `https://verify.twilio.com/v2/Services/${encodeURIComponent(verifySid)}/VerificationCheck`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: authHeader,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: body.toString(),
+          signal: AbortSignal.timeout(10000),
+        }
+      );
+      if (!resp.ok) return false;
+      const data = (await resp.json().catch(() => ({}))) as any;
+      return data?.status === 'approved';
+    } catch {
+      return false;
+    }
+  }
+
+  app.post('/api/auth/send-otp', async (req, res) => {
     const phone = String(req.body?.phoneNumber || '').trim().replace(/\D/g, '');
     if (phone.length < 10) {
       res.status(400).json({ success: false, error: 'Please enter a valid 10-digit mobile number' });
@@ -799,18 +1030,50 @@ async function startServer() {
       });
       return;
     }
-    const otp = String(crypto.randomInt(100000, 1000000));
-    const expiresAt = Date.now() + 5 * 60 * 1000;
-    db.prepare(
-      `INSERT INTO password_reset_otps (phone_number, otp, expires_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(phone_number) DO UPDATE SET otp = excluded.otp, expires_at = excluded.expires_at`
-    ).run(phone, otp, expiresAt);
 
-    res.json({ success: true, otp });
+    const now = Date.now();
+    const prevOtp = db
+      .prepare('SELECT last_sent_at FROM password_reset_otps WHERE phone_number = ?')
+      .get(phone) as { last_sent_at: number } | undefined;
+
+    if (prevOtp && now - Number(prevOtp.last_sent_at || 0) < OTP_RESEND_COOLDOWN_MS) {
+      const waitSec = Math.ceil((OTP_RESEND_COOLDOWN_MS - (now - Number(prevOtp.last_sent_at))) / 1000);
+      res.status(429).json({
+        success: false,
+        error: `Please wait ${waitSec}s before requesting another SMS OTP.`,
+      });
+      return;
+    }
+
+    const dispatch = await dispatchRealSmsOtp(phone);
+    if (!dispatch.ok || !dispatch.otpToStore) {
+      res.status(dispatch.status || 503).json({
+        success: false,
+        error: dispatch.error || 'Failed to deliver SMS OTP.',
+      });
+      return;
+    }
+
+    const expiresAt = now + OTP_TTL_MS;
+    db.prepare(
+      `INSERT INTO password_reset_otps (phone_number, otp, expires_at, attempts, last_sent_at, provider)
+       VALUES (?, ?, ?, 0, ?, ?)
+       ON CONFLICT(phone_number) DO UPDATE SET
+         otp = excluded.otp,
+         expires_at = excluded.expires_at,
+         attempts = 0,
+         last_sent_at = excluded.last_sent_at,
+         provider = excluded.provider`
+    ).run(phone, dispatch.otpToStore, expiresAt, now, dispatch.provider || 'sms');
+
+    const maskedTail = phone.slice(-4);
+    res.json({
+      success: true,
+      message: `Real SMS OTP sent to your registered mobile ending in ****${maskedTail}. Valid for 5 minutes.`,
+    });
   });
 
-  app.post('/api/auth/reset-password', (req, res) => {
+  app.post('/api/auth/reset-password', async (req, res) => {
     const phone = String(req.body?.phoneNumber || '').trim().replace(/\D/g, '');
     const otp = String(req.body?.otp || '').trim();
     const newPassword = String(req.body?.newPassword || '');
@@ -820,22 +1083,65 @@ async function startServer() {
       res.status(400).json({ success: false, error: 'Please enter a valid 10-digit mobile number' });
       return;
     }
+    if (!/^\d{6}$/.test(otp)) {
+      res.status(400).json({ success: false, error: 'Please enter a valid 6-digit SMS OTP code' });
+      return;
+    }
+
     const otpRow = db
-      .prepare('SELECT otp, expires_at FROM password_reset_otps WHERE phone_number = ?')
-      .get(phone) as { otp: string; expires_at: number } | undefined;
+      .prepare('SELECT otp, expires_at, attempts, provider FROM password_reset_otps WHERE phone_number = ?')
+      .get(phone) as
+      | { otp: string; expires_at: number; attempts: number; provider: string }
+      | undefined;
 
     if (!otpRow) {
-      res.status(400).json({ success: false, error: 'Please request an OTP first by clicking "Send OTP"' });
+      res.status(400).json({ success: false, error: 'Please request an SMS OTP first by clicking "Send OTP"' });
       return;
     }
     if (Date.now() > Number(otpRow.expires_at)) {
-      res.status(400).json({ success: false, error: 'OTP has expired. Please request a new OTP' });
+      db.prepare('DELETE FROM password_reset_otps WHERE phone_number = ?').run(phone);
+      res.status(400).json({ success: false, error: 'OTP has expired. Please request a new SMS OTP' });
       return;
     }
-    if (otpRow.otp !== otp) {
-      res.status(400).json({ success: false, error: 'Invalid OTP code. Please enter the correct 6-digit code' });
+    if (Number(otpRow.attempts || 0) >= OTP_MAX_ATTEMPTS) {
+      db.prepare('DELETE FROM password_reset_otps WHERE phone_number = ?').run(phone);
+      res.status(429).json({
+        success: false,
+        error: 'Too many invalid OTP attempts. Please request a new SMS OTP.',
+      });
       return;
     }
+
+    let isOtpValid = false;
+    if (otpRow.provider === 'twilio_verify' && otpRow.otp === 'TWILIO_VERIFY') {
+      isOtpValid = await checkTwilioVerifyOtp(phone, otp);
+    } else if (otpRow.otp.includes(':')) {
+      isOtpValid = verifyPassword(otp, otpRow.otp);
+    }
+
+    if (!isOtpValid) {
+      const nextAttempts = Number(otpRow.attempts || 0) + 1;
+      if (nextAttempts >= OTP_MAX_ATTEMPTS) {
+        db.prepare('DELETE FROM password_reset_otps WHERE phone_number = ?').run(phone);
+        res.status(429).json({
+          success: false,
+          error: 'Too many invalid OTP attempts. Please request a new SMS OTP.',
+        });
+      } else {
+        db.prepare('UPDATE password_reset_otps SET attempts = ? WHERE phone_number = ?').run(
+          nextAttempts,
+          phone
+        );
+        res.status(400).json({
+          success: false,
+          error: `Invalid SMS OTP code (${OTP_MAX_ATTEMPTS - nextAttempts} attempt${
+            OTP_MAX_ATTEMPTS - nextAttempts === 1 ? '' : 's'
+          } remaining).`,
+        });
+      }
+      return;
+    }
+
     if (newPassword.length < 6) {
       res.status(400).json({ success: false, error: 'New password must be at least 6 characters long' });
       return;
@@ -853,6 +1159,9 @@ async function startServer() {
         phone
       );
       db.prepare('DELETE FROM password_reset_otps WHERE phone_number = ?').run(phone);
+      db.prepare(
+        'DELETE FROM sessions WHERE member_id = (SELECT member_id FROM profiles WHERE phone_number = ?)'
+      ).run(phone);
     });
     res.json({ success: true });
   });
