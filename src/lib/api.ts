@@ -91,22 +91,38 @@ async function apiRequest<T = any>(
     headers['X-Admin-Token'] = inMemoryAdminToken;
   }
 
-  const res = await fetch(url, {
-    ...options,
-    credentials: 'include',
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      credentials: 'include',
+      headers,
+    });
+  } catch {
+    return {
+      success: false,
+      error: 'Unable to reach server. Please check your connection and try again.',
+    } as T;
+  }
 
   const text = await res.text();
   let data: any = {};
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
-    data = { success: false, error: 'Invalid server response' };
+    data = {
+      success: false,
+      error: `Server returned an unexpected response (${res.status}).`,
+    };
   }
 
-  if (!res.ok && data.success === undefined) {
-    data.success = false;
+  if (!res.ok) {
+    if (data.success === undefined) {
+      data.success = false;
+    }
+    if (!data.error) {
+      data.error = `Server error (${res.status}). Please try again.`;
+    }
   }
   return data as T;
 }

@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
-import { createServer as createViteServer } from 'vite';
 import { db, runInTransaction } from './server/db.ts';
 import {
   getDeterministicNumberForRound,
@@ -14,7 +13,7 @@ import {
   getOutcomeColorName,
 } from './src/utils/winLogic.ts';
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
 const INITIAL_BALANCE = 98;
 const BONUS_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const STREAK_RESET_MS = 48 * 60 * 60 * 1000;
@@ -42,6 +41,16 @@ type AuthedRequest = Request & {
 };
 
 // ---------------- Security & Crypto Helpers ----------------
+
+function normalizePhoneNumber(raw: unknown): string {
+  let digits = String(raw || '').trim().replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    digits = digits.slice(2);
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    digits = digits.slice(1);
+  }
+  return digits;
+}
 
 function hashPassword(password: string, existingSalt?: string): string {
   const salt = existingSalt || crypto.randomBytes(16).toString('hex');
@@ -652,7 +661,7 @@ async function startServer() {
   // -------- Authentication Routes --------
   app.post('/api/auth/register', (req, res) => {
     try {
-      const phone = String(req.body?.phoneNumber || '').trim().replace(/\D/g, '');
+      const phone = normalizePhoneNumber(req.body?.phoneNumber);
       const password = String(req.body?.password || '');
       const confirmPassword = String(req.body?.confirmPassword || '');
       const inviteCode = String(req.body?.inviteCode || '').trim().toUpperCase();
@@ -670,7 +679,9 @@ async function startServer() {
         return;
       }
 
-      const existing = db.prepare('SELECT member_id FROM profiles WHERE phone_number = ?').get(phone);
+      const existing = db
+        .prepare('SELECT member_id FROM profiles WHERE phone_number = ? OR phone_number = ?')
+        .get(phone, `91${phone}`);
       if (existing) {
         res.status(409).json({ success: false, error: 'An account with this phone number already exists' });
         return;
@@ -678,7 +689,7 @@ async function startServer() {
 
       let matchedReferrer: { member_id: string; phone_number: string } | undefined;
       if (inviteCode && inviteCode !== 'COBCLUBVIP') {
-        const digits = inviteCode.replace(/\D/g, '');
+        const digits = normalizePhoneNumber(inviteCode);
         matchedReferrer = db
           .prepare(
             'SELECT member_id, phone_number FROM profiles WHERE UPPER(member_id) = ? OR phone_number = ?'
@@ -739,7 +750,7 @@ async function startServer() {
 
   app.post('/api/auth/login', (req, res) => {
     try {
-      const phone = String(req.body?.phoneNumber || '').trim().replace(/\D/g, '');
+      const phone = normalizePhoneNumber(req.body?.phoneNumber);
       const password = String(req.body?.password || '');
 
       if (phone.length < 10) {
@@ -752,8 +763,8 @@ async function startServer() {
       }
 
       const profile = db
-        .prepare('SELECT member_id, password_hash FROM profiles WHERE phone_number = ?')
-        .get(phone) as { member_id: string; password_hash: string } | undefined;
+        .prepare('SELECT member_id, password_hash FROM profiles WHERE phone_number = ? OR phone_number = ?')
+        .get(phone, `91${phone}`) as { member_id: string; password_hash: string } | undefined;
 
       if (!profile) {
         res.status(404).json({ success: false, error: 'No account found with this phone number. Please register.' });
@@ -1017,12 +1028,14 @@ async function startServer() {
   }
 
   app.post('/api/auth/send-otp', async (req, res) => {
-    const phone = String(req.body?.phoneNumber || '').trim().replace(/\D/g, '');
+    const phone = normalizePhoneNumber(req.body?.phoneNumber);
     if (phone.length < 10) {
       res.status(400).json({ success: false, error: 'Please enter a valid 10-digit mobile number' });
       return;
     }
-    const existing = db.prepare('SELECT member_id FROM profiles WHERE phone_number = ?').get(phone);
+    const existing = db
+      .prepare('SELECT member_id, phone_number FROM profiles WHERE phone_number = ? OR phone_number = ?')
+      .get(phone, `91${phone}`) as { member_id: string; phone_number: string } | undefined;
     if (!existing) {
       res.status(404).json({
         success: false,
@@ -1030,11 +1043,12 @@ async function startServer() {
       });
       return;
     }
+    const accountPhone = existing.phone_number;
 
     const now = Date.now();
     const prevOtp = db
       .prepare('SELECT last_sent_at FROM password_reset_otps WHERE phone_number = ?')
-      .get(phone) as { last_sent_at: number } | undefined;
+      .get(accountPhone) as { last_sent_at: number } | undefined;
 
     if (prevOtp && now - Number(prevOtp.last_sent_at || 0) < OTP_RESEND_COOLDOWN_MS) {
       const waitSec = Math.ceil((OTP_RESEND_COOLDOWN_MS - (now - Number(prevOtp.last_sent_at))) / 1000);
@@ -1045,7 +1059,7 @@ async function startServer() {
       return;
     }
 
-    const dispatch = await dispatchRealSmsOtp(phone);
+    const dispatch = await dispatchRealSmsOtp(accountPhone);
     if (!dispatch.ok || !dispatch.otpToStore) {
       res.status(dispatch.status || 503).json({
         success: false,
@@ -1064,9 +1078,9 @@ async function startServer() {
          attempts = 0,
          last_sent_at = excluded.last_sent_at,
          provider = excluded.provider`
-    ).run(phone, dispatch.otpToStore, expiresAt, now, dispatch.provider || 'sms');
+    ).run(accountPhone, dispatch.otpToStore, expiresAt, now, dispatch.provider || 'sms');
 
-    const maskedTail = phone.slice(-4);
+    const maskedTail = accountPhone.slice(-4);
     res.json({
       success: true,
       message: `Real SMS OTP sent to your registered mobile ending in ****${maskedTail}. Valid for 5 minutes.`,
@@ -1074,15 +1088,19 @@ async function startServer() {
   });
 
   app.post('/api/auth/reset-password', async (req, res) => {
-    const phone = String(req.body?.phoneNumber || '').trim().replace(/\D/g, '');
+    const rawNormalized = normalizePhoneNumber(req.body?.phoneNumber);
     const otp = String(req.body?.otp || '').trim();
     const newPassword = String(req.body?.newPassword || '');
     const confirmPassword = String(req.body?.confirmPassword || '');
 
-    if (phone.length < 10) {
+    if (rawNormalized.length < 10) {
       res.status(400).json({ success: false, error: 'Please enter a valid 10-digit mobile number' });
       return;
     }
+    const existingAcct = db
+      .prepare('SELECT phone_number FROM profiles WHERE phone_number = ? OR phone_number = ?')
+      .get(rawNormalized, `91${rawNormalized}`) as { phone_number: string } | undefined;
+    const phone = existingAcct?.phone_number || rawNormalized;
     if (!/^\d{6}$/.test(otp)) {
       res.status(400).json({ success: false, error: 'Please enter a valid 6-digit SMS OTP code' });
       return;
@@ -1980,6 +1998,7 @@ async function startServer() {
 
   // -------- Frontend Vite / Static Integration --------
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

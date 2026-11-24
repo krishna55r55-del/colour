@@ -83,6 +83,9 @@ export const AuthPage: React.FC = () => {
         setErrorMessage(res.error || 'Failed to sign in. Please check your credentials.');
         playSound('loss');
       }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Unable to connect to server. Please try again.');
+      playSound('loss');
     } finally {
       setIsLoading(false);
     }
@@ -107,6 +110,9 @@ export const AuthPage: React.FC = () => {
         setErrorMessage(res.error || 'Registration failed.');
         playSound('loss');
       }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Unable to connect to server. Please try again.');
+      playSound('loss');
     } finally {
       setIsLoading(false);
     }
@@ -132,6 +138,9 @@ export const AuthPage: React.FC = () => {
         );
         playSound('win');
       }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Unable to send SMS OTP. Please try again.');
+      playSound('loss');
     } finally {
       setIsSendingOtp(false);
     }
@@ -184,6 +193,9 @@ export const AuthPage: React.FC = () => {
         );
         playSound('jackpot');
       }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Unable to reset password. Please try again.');
+      playSound('loss');
     } finally {
       setIsLoading(false);
     }
@@ -292,7 +304,24 @@ export const AuthPage: React.FC = () => {
           {errorMessage && (
             <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium flex items-start gap-2 animate-in fade-in duration-200">
               <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-              <span>{errorMessage}</span>
+              <div className="flex-1 space-y-1.5">
+                <span className="block">{errorMessage}</span>
+                {activeTab === 'signin' && errorMessage.toLowerCase().includes('please register') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setRegNumber(signInNumber);
+                      setActiveTab('register');
+                      setErrorMessage(null);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] cursor-pointer transition-colors"
+                  >
+                    <span>Create Account Now</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
