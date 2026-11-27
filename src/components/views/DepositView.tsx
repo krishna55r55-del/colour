@@ -344,12 +344,12 @@ export const DepositView: React.FC = () => {
             {/* Scannable UPI QR Code */}
             <div className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 border border-slate-200">
               <div
-                onClick={() => setLightboxImage('/assets/aistudio/cobclub_upi_qr_b5e37b20.png')}
+                onClick={() => setLightboxImage('/assets/aistudio/cobclub_qr_1___1__b0202cf8.png')}
                 className="w-56 sm:w-64 rounded-2xl bg-white p-2 border border-slate-200 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
                 title="Click to enlarge QR Code"
               >
                 <img
-                  src="/assets/aistudio/cobclub_upi_qr_b5e37b20.png"
+                  src="/assets/aistudio/cobclub_qr_1___1__b0202cf8.png"
                   alt="COBCLUB Official UPI QR Code - 7841812365@nyes"
                   className="w-full h-auto rounded-xl object-contain"
                 />

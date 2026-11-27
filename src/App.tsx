@@ -30,8 +30,23 @@ import { MemoryMatchGame } from './components/games/MemoryMatchGame';
 import { AuthPage } from './components/auth/AuthPage';
 
 const AppContent: React.FC = () => {
-  const { activeView, selectedGameId, isAuthenticated } = useGame();
+  const { activeView, selectedGameId, isAuthenticated, isAuthLoading } = useGame();
   const [legalModal, setLegalModal] = useState<LegalModalType>(null);
+
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-[#f4f5f8] flex flex-col items-center justify-center p-4">
+        <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-rose-600 to-red-500 p-0.5 shadow-md animate-pulse">
+          <div className="w-full h-full bg-white rounded-[14px] flex items-center justify-center font-display font-black text-xl text-rose-600">
+            C
+          </div>
+        </div>
+        <p className="text-xs font-bold text-slate-500 mt-3 uppercase tracking-widest">
+          Loading COBCLUB...
+        </p>
+      </div>
+    );
+  }
 
   // Enforce Login Page Requirement
   if (!isAuthenticated) {
