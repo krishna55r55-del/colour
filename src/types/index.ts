@@ -61,6 +61,24 @@ export interface PredictionRoundRecord {
   finalizedAt: number;
 }
 
+export interface WinGoRoundItem {
+  period: string;
+  number: number;
+  bigSmall: 'Big' | 'Small';
+  color: 'green' | 'red' | 'purple_red' | 'purple_green';
+}
+
+export interface PaginatedBetsResponse {
+  success: boolean;
+  items: GameHistoryItem[];
+  totalCount: number;
+  page: number;
+  totalPages: number;
+  hasMore: boolean;
+  stats?: UserStats;
+  error?: string;
+}
+
 export interface WinGoBetOrderInput {
   period: string;
   duration: number; // 30, 60, 180, 300

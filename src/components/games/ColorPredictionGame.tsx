@@ -27,13 +27,11 @@ import { useGame } from '../../context/GameContext';
 import { WinPosterModal, WinPosterData } from '../common/WinPosterModal';
 import { LossPosterModal, LossPosterData } from '../common/LossPosterModal';
 import { BetPlacedToast } from '../common/BetPlacedToast';
-import { BetDetailModal } from '../common/BetDetailModal';
 import {
   getPeriodForTime,
   getContinuousRemainingSeconds,
 } from '../../utils/winLogic';
-import { GameHistoryItem } from '../../types';
-import { WinGoRoundItem } from '../../lib/api';
+import { GameHistoryItem, WinGoRoundItem } from '../../types';
 
 type WinGoDuration = 30 | 60 | 180 | 300;
 type BetTargetType = 'green' | 'purple' | 'violet' | 'red' | 'big' | 'small' | number;
@@ -68,7 +66,6 @@ export const ColorPredictionGame: React.FC = () => {
   const [myRecordTotalPages, setMyRecordTotalPages] = useState<number>(1);
   const [myRecordHasMore, setMyRecordHasMore] = useState<boolean>(false);
   const [isMyRecordLoading, setIsMyRecordLoading] = useState<boolean>(false);
-  const [selectedBetDetail, setSelectedBetDetail] = useState<GameHistoryItem | null>(null);
   const [isSubmittingBet, setIsSubmittingBet] = useState<boolean>(false);
 
   const playSoundRef = useRef(playSound);
@@ -1167,7 +1164,6 @@ export const ColorPredictionGame: React.FC = () => {
               history={history}
               totalBetsCount={totalBetsCount}
               playSound={playSound}
-              onSelectBet={setSelectedBetDetail}
             />
           )}
         </div>
@@ -1497,9 +1493,6 @@ export const ColorPredictionGame: React.FC = () => {
         data={lossPosterData}
         onClose={() => setLossPosterData((prev) => ({ ...prev, isOpen: false }))}
       />
-
-      {/* Full Bet Detail Modal */}
-      <BetDetailModal item={selectedBetDetail} onClose={() => setSelectedBetDetail(null)} />
     </div>
   );
 };
@@ -1533,7 +1526,6 @@ interface MyRecordTabProps {
   history: GameHistoryItem[];
   totalBetsCount: number;
   playSound: (type: any) => void;
-  onSelectBet: (item: GameHistoryItem) => void;
 }
 
 const MyRecordTabContent: React.FC<MyRecordTabProps> = ({
@@ -1559,7 +1551,6 @@ const MyRecordTabContent: React.FC<MyRecordTabProps> = ({
   history,
   totalBetsCount,
   playSound,
-  onSelectBet,
 }) => {
   const loadRecords = React.useCallback(
     async (page: number, append: boolean, viewAll: boolean) => {
@@ -1570,7 +1561,7 @@ const MyRecordTabContent: React.FC<MyRecordTabProps> = ({
           limit: viewAll ? 20 : 10,
           gameId: betScopeFilter === 'wingo' ? 'color-prediction' : 'all',
           outcome: betOutcomeFilter,
-          status: 'all',
+          status: 'Completed',
         });
         if (res.success) {
           setMyRecordItems((prev) => {
@@ -1721,96 +1712,63 @@ const MyRecordTabContent: React.FC<MyRecordTabProps> = ({
         <div className="py-10 text-center rounded-2xl bg-slate-50 border border-slate-200 text-slate-500 font-semibold">
           Loading records...
         </div>
-      ) : myRecordItems.length > 0 ? (
+      ) : myRecordItems.filter((item) => item.status !== 'Pending').length > 0 ? (
         <div className="space-y-2">
-          {myRecordItems.map((item, idx) => {
-            const isPending = item.status === 'Pending';
-            const isWin = !isPending && item.isWin;
-            const betTargetLabel =
-              item.selectedOption ||
-              (item.target
-                ? !isNaN(Number(item.target))
-                  ? `Number ${item.target}`
-                  : item.target.toUpperCase()
-                : item.choice.replace(/\s*\[Issue\s+.*?\]/g, '').trim());
-            const dt = new Date(item.timestamp);
+          {myRecordItems
+            .filter((item) => item.status !== 'Pending')
+            .map((item, idx) => {
+              const isWin = item.isWin;
+              const betTargetLabel =
+                item.selectedOption ||
+                (item.target
+                  ? !isNaN(Number(item.target))
+                    ? `Number ${item.target}`
+                    : item.target.toUpperCase()
+                  : item.choice.replace(/\s*\[Issue\s+.*?\]/g, '').trim());
 
-            return (
-              <div
-                key={item.id || idx}
-                onClick={() => onSelectBet(item)}
-                className={`p-3 rounded-2xl border cursor-pointer transition-all hover:shadow-xs flex items-center justify-between gap-2 ${
-                  isPending
-                    ? 'bg-amber-50/80 border-amber-300'
-                    : isWin
+              return (
+                <div
+                  key={item.id || idx}
+                  className={`p-3 rounded-2xl border flex items-center justify-between gap-2 select-none ${
+                    isWin
                       ? 'bg-emerald-50/90 border-emerald-300'
                       : 'bg-red-50/90 border-red-300'
-                }`}
-              >
-                <div className="space-y-1 min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
                     <span
-                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shadow-xs shrink-0 ${
-                        isPending
-                          ? 'bg-amber-500 text-slate-950'
-                          : isWin
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-red-600 text-white'
+                      className={`px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider shadow-xs shrink-0 ${
+                        isWin ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
                       }`}
                     >
-                      {isPending ? 'PENDING' : isWin ? 'WIN' : 'LOSS'}
+                      {isWin ? 'WIN' : 'LOSS'}
                     </span>
 
-                    <span className="px-2 py-0.5 rounded-lg text-[11px] font-black uppercase tracking-wide border bg-white text-slate-800 border-slate-200 truncate">
-                      Bet: {betTargetLabel}
-                    </span>
-
-                    {item.period && (
-                      <span className="text-[10px] font-mono text-slate-500 font-bold">
-                        #{item.period}
+                    {betTargetLabel && (
+                      <span
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-black uppercase tracking-wide border truncate ${
+                          isWin
+                            ? 'bg-white text-emerald-800 border-emerald-200'
+                            : 'bg-white text-red-700 border-red-200'
+                        }`}
+                      >
+                        Bet: {betTargetLabel}
                       </span>
                     )}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] text-slate-600">
-                    <span className="font-mono font-bold text-slate-700">{item.id}</span>
-                    <span>
-                      Result:{' '}
-                      <strong className="text-slate-800">
-                        {isPending
-                          ? 'Waiting Draw'
-                          : item.outcome || (item.resultNumber !== undefined ? `Number ${item.resultNumber}` : 'Settled')}
-                      </strong>
-                    </span>
-                    <span className="text-slate-500">
-                      {dt.toLocaleDateString()} {dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-right shrink-0">
                   <span
-                    className={`font-mono font-black text-sm tabular-nums block ${
-                      isPending
-                        ? 'text-amber-700'
-                        : isWin
-                          ? 'text-emerald-700'
-                          : 'text-red-600'
+                    className={`font-mono font-black text-sm tabular-nums shrink-0 ${
+                      isWin ? 'text-emerald-700' : 'text-red-600'
                     }`}
                   >
-                    {isPending
-                      ? `₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`
-                      : isWin
-                        ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
-                        : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    Wager: ₹{Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}
+                    {isWin
+                      ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
+                      : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
                   </span>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
 
           {/* VIEW ALL CTA when showing latest 10 */}
           {!showAllMyRecords && myRecordTotalCount > 10 && (

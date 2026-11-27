@@ -21,18 +21,33 @@ import {
   ReferralRecord,
   ReferralMilestoneBonus,
   ReferralStats,
-} from '../types';
-import { soundManager } from '../utils/audio';
-import { parsePeriodToTimestamp, getPeriodForTime } from '../utils/winLogic';
-import {
-  api,
-  setAuthToken,
-  setAdminToken,
-  hasAdminToken,
-  AccountStatePayload,
   WinGoRoundItem,
   PaginatedBetsResponse,
-} from '../lib/api';
+} from '../types';
+import { soundManager } from '../utils/audio';
+import {
+  parsePeriodToTimestamp,
+  getPeriodForTime,
+  getDeterministicNumberForRound,
+  getFinalizedRound,
+  determineWinGoOutcome,
+  evaluateWinGoBet,
+  BetOrderEval,
+} from '../utils/winLogic';
+import {
+  syncUserProfile,
+  updateWalletBalanceInSupabase,
+  recordBetInSupabase,
+  updateBetOutcomeInSupabase,
+  fetchBetHistoryFromSupabase,
+  recordGameRoundInSupabase,
+  recordDepositInSupabase,
+  updateDepositStatusInSupabase,
+  fetchAllDepositsFromSupabase,
+  recordWithdrawalInSupabase,
+  saveBankDetailsToSupabase,
+  recordDailyBonusInSupabase,
+} from '../lib/supabase';
 
 interface GameContextType {
   balance: number;
@@ -160,6 +175,15 @@ export const DAILY_BONUS_TIERS = [
 
 const STORAGE_KEY_SOUND = 'cobclub_sound_pref_v1';
 const STORAGE_KEY_RECENT = 'cobclub_recent_games_v1';
+const STORAGE_KEY_ACCOUNTS = 'cobclub_accounts_v1';
+const STORAGE_KEY_AUTH_USER = 'cobclub_auth_user_v1';
+const STORAGE_KEY_MASTER_DEPOSITS = 'cobclub_master_deposits_v1';
+const STORAGE_KEY_REFERRALS = 'cobclub_referrals_v1';
+const STORAGE_KEY_REFERRAL_BONUSES = 'cobclub_referral_bonuses_v1';
+const STORAGE_KEY_WINGO_OUTCOMES = 'cobclub_wingo_round_outcomes_v1';
+const STORAGE_KEY_ADMIN_SESSION = 'cobclub_admin_session';
+
+const ADMIN_PASSCODE = 'Sweta@1212';
 
 export const REFERRAL_REWARD_AMOUNT = 77;
 export const REFERRAL_MILESTONE_TARGET = 5;
@@ -187,6 +211,156 @@ const defaultStats: UserStats = {
   favoriteGameId: null,
 };
 
+interface StoredAccount {
+  phoneNumber: string;
+  password: string;
+  memberId: string;
+  registeredAt: number;
+  referredBy?: string;
+  balance: number;
+  hasCompletedFirstDeposit: boolean;
+  dailyBonus: DailyBonusState;
+  history: GameHistoryItem[];
+  savedBankDetails: BankAccountDetails | null;
+  withdrawRecords: WithdrawRecord[];
+  depositRecords: DepositRecord[];
+}
+
+const readJson = <T,>(key: string, fallback: T): T => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const writeJson = (key: string, value: unknown) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+};
+
+const normalizePhone = (phone: string): string => {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length > 10 && digits.startsWith('91')) {
+    return digits.slice(-10);
+  }
+  return digits;
+};
+
+const computeStats = (items: GameHistoryItem[]): UserStats => {
+  const completed = items.filter((b) => b.status !== 'Pending');
+  if (completed.length === 0) return { ...defaultStats };
+
+  let totalWins = 0;
+  let totalLosses = 0;
+  let totalWagered = 0;
+  let totalWon = 0;
+  let biggestWin = 0;
+  let bestStreak = 0;
+  let runningStreak = 0;
+  const counts: Record<string, number> = {};
+
+  const chronological = [...completed].sort((a, b) => a.timestamp - b.timestamp);
+  chronological.forEach((b) => {
+    totalWagered += Number(b.betAmount || 0);
+    counts[b.gameId] = (counts[b.gameId] || 0) + 1;
+    if (b.isWin) {
+      totalWins += 1;
+      const payout = Number(b.payout || 0);
+      totalWon += payout;
+      if (payout > biggestWin) biggestWin = payout;
+      runningStreak += 1;
+      if (runningStreak > bestStreak) bestStreak = runningStreak;
+    } else {
+      totalLosses += 1;
+      runningStreak = 0;
+    }
+  });
+
+  let favoriteGameId: GameId | null = null;
+  let maxCount = 0;
+  Object.entries(counts).forEach(([gid, cnt]) => {
+    if (cnt > maxCount) {
+      maxCount = cnt;
+      favoriteGameId = gid as GameId;
+    }
+  });
+
+  return {
+    totalRounds: completed.length,
+    totalWins,
+    totalLosses,
+    totalWagered: Number(totalWagered.toFixed(2)),
+    totalWon: Number(totalWon.toFixed(2)),
+    biggestWin: Number(biggestWin.toFixed(2)),
+    currentStreak: runningStreak,
+    bestStreak,
+    favoriteGameId,
+  };
+};
+
+const numberToRoundItem = (period: string, num: number): WinGoRoundItem => {
+  let color: WinGoRoundItem['color'] = 'red';
+  if (num === 0) color = 'purple_red';
+  else if (num === 5) color = 'purple_green';
+  else if ([1, 3, 7, 9].includes(num)) color = 'green';
+  return {
+    period,
+    number: num,
+    bigSmall: num >= 5 ? 'Big' : 'Small',
+    color,
+  };
+};
+
+const buildContinuousHistory = (
+  duration: number,
+  count: number,
+  settledOutcomes: Record<string, WinGoRoundItem>,
+  hist: GameHistoryItem[],
+  nowMs: number = Date.now()
+): WinGoRoundItem[] => {
+  const currentRoundIdx = Math.floor(nowMs / (duration * 1000));
+  const rounds: WinGoRoundItem[] = [];
+
+  for (let i = 1; i <= count; i++) {
+    const targetRoundIdx = currentRoundIdx - i;
+    const roundStartMs = targetRoundIdx * duration * 1000;
+    const period = getPeriodForTime(roundStartMs, duration);
+    const key = `${duration}_${period}`;
+
+    if (settledOutcomes[key]) {
+      rounds.push(settledOutcomes[key]);
+      continue;
+    }
+
+    const settledBet = hist.find(
+      (h) =>
+        h.gameId === 'color-prediction' &&
+        h.status === 'Completed' &&
+        h.period === period &&
+        (h.duration === duration || (!h.duration && duration === 30)) &&
+        typeof h.resultNumber === 'number'
+    );
+
+    if (settledBet && typeof settledBet.resultNumber === 'number') {
+      rounds.push(numberToRoundItem(period, settledBet.resultNumber));
+      continue;
+    }
+
+    const fin = getFinalizedRound(period, duration);
+    rounds.push({
+      period: fin.period,
+      number: fin.number,
+      bigSmall: fin.bigSmall,
+      color: fin.color,
+    });
+  }
+
+  return rounds;
+};
+
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -208,25 +382,41 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userReferrals, setUserReferrals] = useState<ReferralRecord[]>([]);
   const [userReferralBonuses, setUserReferralBonuses] = useState<ReferralMilestoneBonus[]>([]);
 
-  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(() => hasAdminToken());
-  const [masterDepositRequests, setMasterDepositRequests] = useState<DepositRecord[]>([]);
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem(STORAGE_KEY_ADMIN_SESSION) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [masterDepositRequests, setMasterDepositRequests] = useState<DepositRecord[]>(() =>
+    readJson<DepositRecord[]>(STORAGE_KEY_MASTER_DEPOSITS, [])
+  );
+
+  const settledOutcomesRef = useRef<Record<string, WinGoRoundItem>>(
+    readJson<Record<string, WinGoRoundItem>>(STORAGE_KEY_WINGO_OUTCOMES, {})
+  );
 
   const [wingoRoundsByDuration, setWingoRoundsByDuration] = useState<
     Record<number, WinGoRoundItem[]>
-  >({
-    30: [],
-    60: [],
-    180: [],
-    300: [],
+  >(() => {
+    const now = Date.now();
+    const outcomes = settledOutcomesRef.current;
+    return {
+      30: buildContinuousHistory(30, 50, outcomes, [], now),
+      60: buildContinuousHistory(60, 50, outcomes, [], now),
+      180: buildContinuousHistory(180, 50, outcomes, [], now),
+      300: buildContinuousHistory(300, 50, outcomes, [], now),
+    };
   });
+
   const [wingoCurrentPeriods, setWingoCurrentPeriods] = useState<Record<number, string>>(() => ({
     30: getPeriodForTime(Date.now(), 30),
     60: getPeriodForTime(Date.now(), 60),
     180: getPeriodForTime(Date.now(), 180),
     300: getPeriodForTime(Date.now(), 300),
   }));
-  const [serverClockOffsetMs, setServerClockOffsetMs] = useState<number>(0);
-  const serverClockOffsetRef = useRef<number>(0);
+  const [serverClockOffsetMs] = useState<number>(0);
 
   const [recentlyPlayed, setRecentlyPlayed] = useState<GameId[]>(() => {
     try {
@@ -262,8 +452,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   historyRef.current = history;
   const soundEnabledRef = useRef(soundEnabled);
   soundEnabledRef.current = soundEnabled;
+  const winManagerEnabledRef = useRef(winManagerEnabled);
+  winManagerEnabledRef.current = winManagerEnabled;
   const isClaimingRef = useRef(false);
   const isSettlingRef = useRef(false);
+  const otpStoreRef = useRef<Record<string, { otp: string; expiresAt: number }>>({});
 
   const playSound = useCallback(
     (
@@ -295,9 +488,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_RECENT, JSON.stringify(recentlyPlayed));
-    } catch {}
+    writeJson(STORAGE_KEY_RECENT, recentlyPlayed);
   }, [recentlyPlayed]);
 
   useEffect(() => {
@@ -306,71 +497,124 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
   }, [soundEnabled]);
 
-  const applyAccountState = useCallback((state: AccountStatePayload) => {
-    setUser(state.user);
-    userRef.current = state.user;
-    setBalance(state.balance);
-    balanceRef.current = state.balance;
-    setHasCompletedFirstDeposit(state.hasCompletedFirstDeposit);
-    setStats(state.stats);
-    setDailyBonus(state.dailyBonus);
-    setCanClaimDailyBonus(state.canClaimDailyBonus);
-    setTimeUntilNextBonus(state.timeUntilNextBonus);
-    setHistory(state.latestBets);
-    historyRef.current = state.latestBets;
-    setTotalBetsCount(state.totalBetsCount);
-    setDepositRecords(state.depositRecords);
-    setWithdrawRecords(state.withdrawRecords);
-    setSavedBankDetails(state.savedBankDetails);
-    setUserReferrals(state.userReferrals);
-    setUserReferralBonuses(state.userReferralBonuses);
+  const persistCurrentAccount = useCallback((updater: (acc: StoredAccount) => StoredAccount) => {
+    const currentUser = userRef.current;
+    if (!currentUser) return null;
+    const accounts = readJson<Record<string, StoredAccount>>(STORAGE_KEY_ACCOUNTS, {});
+    const existing = accounts[currentUser.phoneNumber];
+    if (!existing) return null;
+    const updated = updater(existing);
+    accounts[currentUser.phoneNumber] = updated;
+    writeJson(STORAGE_KEY_ACCOUNTS, accounts);
+    return updated;
+  }, []);
+
+  const applyStoredAccount = useCallback((acc: StoredAccount) => {
+    const profile: UserProfile = {
+      phoneNumber: acc.phoneNumber,
+      memberId: acc.memberId,
+      registeredAt: acc.registeredAt,
+      lastDailyBonusAt: acc.dailyBonus.lastClaimedAt ?? undefined,
+      dailyStreak: acc.dailyBonus.streak,
+      totalBonusClaimed: acc.dailyBonus.totalClaimed,
+      referredBy: acc.referredBy,
+    };
+
+    const sortedHistory = [...(acc.history || [])].sort((a, b) => b.timestamp - a.timestamp);
+    const computedStats = computeStats(sortedHistory);
+
+    const elapsed = acc.dailyBonus.lastClaimedAt ? Date.now() - acc.dailyBonus.lastClaimedAt : BONUS_COOLDOWN_MS;
+    const left = acc.dailyBonus.lastClaimedAt ? Math.max(0, BONUS_COOLDOWN_MS - elapsed) : 0;
+
+    const allReferrals = readJson<ReferralRecord[]>(STORAGE_KEY_REFERRALS, []);
+    const allBonuses = readJson<ReferralMilestoneBonus[]>(STORAGE_KEY_REFERRAL_BONUSES, []);
+
+    setUser(profile);
+    userRef.current = profile;
+    setBalance(acc.balance);
+    balanceRef.current = acc.balance;
+    setHasCompletedFirstDeposit(Boolean(acc.hasCompletedFirstDeposit));
+    setStats(computedStats);
+    setDailyBonus(acc.dailyBonus || defaultDailyBonus);
+    setCanClaimDailyBonus(left === 0);
+    setTimeUntilNextBonus(left);
+    setHistory(sortedHistory);
+    historyRef.current = sortedHistory;
+    setTotalBetsCount(sortedHistory.filter((h) => h.status !== 'Pending').length);
+    setDepositRecords(acc.depositRecords || []);
+    setWithdrawRecords(acc.withdrawRecords || []);
+    setSavedBankDetails(acc.savedBankDetails || null);
+    setUserReferrals(allReferrals.filter((r) => r.referrerMemberId === acc.memberId));
+    setUserReferralBonuses(allBonuses.filter((b) => b.referrerMemberId === acc.memberId));
   }, []);
 
   const refreshWinGoState = useCallback(async () => {
-    try {
-      const res = await api.getWinGoState();
-      if (res.success) {
-        const offset = res.serverTimeMs - Date.now();
-        serverClockOffsetRef.current = offset;
-        setServerClockOffsetMs(offset);
-        setWingoCurrentPeriods(res.currentPeriods);
-        setWingoRoundsByDuration(res.historiesByDuration);
-
-        if (res.settledBets && res.settledBets.length > 0) {
-          setHistory((prev) => {
-            const map = new Map<string, GameHistoryItem>();
-            res.settledBets.forEach((b) => map.set(b.id, b));
-            prev.forEach((p) => {
-              if (!map.has(p.id)) map.set(p.id, p);
-            });
-            const merged = Array.from(map.values()).sort((a, b) => b.timestamp - a.timestamp);
-            historyRef.current = merged;
-            return merged;
-          });
-        }
-      }
-    } catch (err) {
-      console.warn('WinGo state refresh warning:', err);
-    }
+    const now = Date.now();
+    const outcomes = settledOutcomesRef.current;
+    const hist = historyRef.current;
+    setWingoCurrentPeriods({
+      30: getPeriodForTime(now, 30),
+      60: getPeriodForTime(now, 60),
+      180: getPeriodForTime(now, 180),
+      300: getPeriodForTime(now, 300),
+    });
+    setWingoRoundsByDuration({
+      30: buildContinuousHistory(30, 50, outcomes, hist, now),
+      60: buildContinuousHistory(60, 50, outcomes, hist, now),
+      180: buildContinuousHistory(180, 50, outcomes, hist, now),
+      300: buildContinuousHistory(300, 50, outcomes, hist, now),
+    });
   }, []);
 
   const refreshAccountState = useCallback(async () => {
     try {
-      const res = await api.getAccountState();
-      if (res.success && res.authenticated && res.state) {
-        applyAccountState(res.state);
-      } else {
+      const savedPhone = localStorage.getItem(STORAGE_KEY_AUTH_USER);
+      if (!savedPhone) {
         setUser(null);
         userRef.current = null;
+        return;
       }
-    } catch (err) {
-      console.warn('Account state load warning:', err);
+
+      const accounts = readJson<Record<string, StoredAccount>>(STORAGE_KEY_ACCOUNTS, {});
+      const acc = accounts[savedPhone];
+      if (!acc) {
+        localStorage.removeItem(STORAGE_KEY_AUTH_USER);
+        setUser(null);
+        userRef.current = null;
+        return;
+      }
+
+      applyStoredAccount(acc);
+
+      // Background sync with Supabase if reachable (merge bet history without overwriting local settled outcomes)
+      syncUserProfile(acc.memberId, acc.phoneNumber, acc.balance).catch(() => {});
+      fetchBetHistoryFromSupabase(acc.memberId, acc.phoneNumber)
+        .then((remoteBets) => {
+          if (!remoteBets || remoteBets.length === 0) return;
+          const localMap = new Map<string, GameHistoryItem>();
+          (acc.history || []).forEach((b) => localMap.set(b.id, b));
+          let changed = false;
+          remoteBets.forEach((rb) => {
+            if (!localMap.has(rb.id)) {
+              localMap.set(rb.id, rb);
+              changed = true;
+            }
+          });
+          if (changed && userRef.current?.memberId === acc.memberId) {
+            const merged = Array.from(localMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+            persistCurrentAccount((curr) => ({ ...curr, history: merged }));
+            setHistory(merged);
+            historyRef.current = merged;
+            setStats(computeStats(merged));
+            setTotalBetsCount(merged.filter((h) => h.status !== 'Pending').length);
+          }
+        })
+        .catch(() => {});
     } finally {
       setIsAuthLoading(false);
     }
-  }, [applyAccountState]);
+  }, [applyStoredAccount, persistCurrentAccount]);
 
-  // Initial load: restore session from backend HttpOnly cookie and fetch official WinGo rounds
   useEffect(() => {
     refreshAccountState();
     refreshWinGoState();
@@ -397,65 +641,194 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [history]);
 
   const settleWinGoBets = useCallback(async () => {
-    if (!userRef.current) return { settledBets: [] };
-    if (isSettlingRef.current) return { settledBets: [] };
+    const now = Date.now();
+    const outcomes = { ...settledOutcomesRef.current };
+
+    if (isSettlingRef.current) {
+      return {
+        settledBets: [],
+        historiesByDuration: {
+          30: buildContinuousHistory(30, 50, outcomes, historyRef.current, now),
+          60: buildContinuousHistory(60, 50, outcomes, historyRef.current, now),
+          180: buildContinuousHistory(180, 50, outcomes, historyRef.current, now),
+          300: buildContinuousHistory(300, 50, outcomes, historyRef.current, now),
+        },
+        currentPeriods: {
+          30: getPeriodForTime(now, 30),
+          60: getPeriodForTime(now, 60),
+          180: getPeriodForTime(now, 180),
+          300: getPeriodForTime(now, 300),
+        },
+        serverTimeMs: now,
+      };
+    }
+
     isSettlingRef.current = true;
     try {
-      const res = await api.settleWinGoBets();
-      if (res.success) {
-        const offset = res.serverTimeMs - Date.now();
-        serverClockOffsetRef.current = offset;
-        setServerClockOffsetMs(offset);
-        setWingoCurrentPeriods(res.currentPeriods);
-        setWingoRoundsByDuration(res.historiesByDuration);
-        setBalance(res.balance);
-        balanceRef.current = res.balance;
-        setStats(res.stats);
+      const currentHist = [...historyRef.current];
+      const readyPending = currentHist.filter((h) => {
+        if (h.gameId !== 'color-prediction' || h.status !== 'Pending' || !h.period) return false;
+        const { roundEndTime } = parsePeriodToTimestamp(h.period, h.duration || 30);
+        return now >= roundEndTime;
+      });
 
-        if (res.settledBets && res.settledBets.length > 0) {
-          setHistory((prev) => {
-            const map = new Map<string, GameHistoryItem>();
-            res.settledBets.forEach((b) => map.set(b.id, b));
-            prev.forEach((p) => {
-              if (!map.has(p.id)) map.set(p.id, p);
-            });
-            const merged = Array.from(map.values()).sort((a, b) => b.timestamp - a.timestamp);
-            historyRef.current = merged;
-            return merged;
-          });
-        } else {
-          // If background server ticker settled the bet 200ms earlier, sync latest bets from DB
-          const latest = await api.getBets({ page: 1, limit: 50 });
-          if (latest.success) {
-            setHistory(latest.items);
-            historyRef.current = latest.items;
-            setTotalBetsCount(latest.totalCount);
-            setStats(latest.stats);
+      const settledBets: GameHistoryItem[] = [];
+      let totalWinCredit = 0;
+
+      if (readyPending.length > 0) {
+        // Group ready pending bets by duration_period
+        const groups = new Map<string, GameHistoryItem[]>();
+        readyPending.forEach((b) => {
+          const dur = b.duration || 30;
+          const key = `${dur}_${b.period}`;
+          const list = groups.get(key) || [];
+          list.push(b);
+          groups.set(key, list);
+        });
+
+        const updatedMap = new Map<string, GameHistoryItem>();
+        currentHist.forEach((b) => updatedMap.set(b.id, b));
+
+        groups.forEach((betsInRound, key) => {
+          const dur = betsInRound[0].duration || 30;
+          const period = betsInRound[0].period!;
+          const { roundIdx } = parsePeriodToTimestamp(period, dur);
+          const deterministicNum = getDeterministicNumberForRound(roundIdx, dur);
+
+          let drawnNum: number;
+          if (outcomes[key]) {
+            drawnNum = outcomes[key].number;
+          } else {
+            const evalOrders: BetOrderEval[] = betsInRound.map((b) => ({
+              target: (b.target ?? b.choice) as BetOrderEval['target'],
+              amount: b.betAmount,
+              label: b.selectedOption,
+            }));
+            drawnNum = determineWinGoOutcome(
+              evalOrders,
+              winManagerEnabledRef.current,
+              deterministicNum
+            );
+            const roundItem = numberToRoundItem(period, drawnNum);
+            outcomes[key] = roundItem;
+
+            recordGameRoundInSupabase({
+              id: `${dur}_${period}`,
+              duration: dur,
+              period,
+              roundIndex: roundIdx,
+              number: roundItem.number,
+              color: roundItem.color,
+              bigSmall: roundItem.bigSmall,
+              finalizedAt: now,
+            }).catch(() => {});
           }
-        }
 
-        return {
-          settledBets: res.settledBets || [],
-          historiesByDuration: res.historiesByDuration,
-          currentPeriods: res.currentPeriods,
-          serverTimeMs: res.serverTimeMs,
-        };
+          betsInRound.forEach((b) => {
+            const target = (b.target ?? b.choice) as BetOrderEval['target'];
+            const evaluation = evaluateWinGoBet(
+              target,
+              b.betAmount,
+              drawnNum,
+              undefined,
+              winManagerEnabledRef.current
+            );
+
+            if (evaluation.isWin && evaluation.payout > 0) {
+              totalWinCredit += evaluation.payout;
+            }
+
+            const settled: GameHistoryItem = {
+              ...b,
+              status: 'Completed',
+              outcome: `Number ${evaluation.resultNumber} (${evaluation.resultColor})`,
+              payout: evaluation.payout,
+              grossPayout: evaluation.grossPayout,
+              commission: evaluation.commission,
+              netProfit: evaluation.netProfit,
+              isWin: evaluation.isWin,
+              resultNumber: evaluation.resultNumber,
+              resultColor: evaluation.resultColor,
+              selectedOption: evaluation.selectedOption || b.selectedOption,
+              settledAt: now,
+            };
+
+            updatedMap.set(b.id, settled);
+            settledBets.push(settled);
+
+            updateBetOutcomeInSupabase(
+              b.id,
+              settled.outcome,
+              settled.payout,
+              settled.netProfit,
+              settled.isWin,
+              now
+            ).catch(() => {});
+          });
+        });
+
+        settledOutcomesRef.current = outcomes;
+        writeJson(STORAGE_KEY_WINGO_OUTCOMES, outcomes);
+
+        const nextHistory = Array.from(updatedMap.values()).sort(
+          (a, b) => b.timestamp - a.timestamp
+        );
+        const nextBalance = Number((balanceRef.current + totalWinCredit).toFixed(2));
+        const nextStats = computeStats(nextHistory);
+
+        historyRef.current = nextHistory;
+        setHistory(nextHistory);
+        balanceRef.current = nextBalance;
+        setBalance(nextBalance);
+        setStats(nextStats);
+        setTotalBetsCount(nextHistory.filter((h) => h.status !== 'Pending').length);
+
+        const acc = persistCurrentAccount((curr) => ({
+          ...curr,
+          balance: nextBalance,
+          history: nextHistory,
+        }));
+        if (acc) {
+          updateWalletBalanceInSupabase(acc.memberId, acc.phoneNumber, nextBalance).catch(() => {});
+        }
       }
-      return { settledBets: [] };
+
+      const historiesByDuration: Record<number, WinGoRoundItem[]> = {
+        30: buildContinuousHistory(30, 50, outcomes, historyRef.current, now),
+        60: buildContinuousHistory(60, 50, outcomes, historyRef.current, now),
+        180: buildContinuousHistory(180, 50, outcomes, historyRef.current, now),
+        300: buildContinuousHistory(300, 50, outcomes, historyRef.current, now),
+      };
+      const currentPeriods: Record<number, string> = {
+        30: getPeriodForTime(now, 30),
+        60: getPeriodForTime(now, 60),
+        180: getPeriodForTime(now, 180),
+        300: getPeriodForTime(now, 300),
+      };
+
+      setWingoRoundsByDuration(historiesByDuration);
+      setWingoCurrentPeriods(currentPeriods);
+
+      return {
+        settledBets,
+        historiesByDuration,
+        currentPeriods,
+        serverTimeMs: now,
+      };
     } finally {
       isSettlingRef.current = false;
     }
-  }, []);
+  }, [persistCurrentAccount]);
 
-  // Global settlement tick: when any pending WinGo bet's round has ended, call server settle
+  // Global settlement tick: settle any pending Win Go bets once their round ends
   useEffect(() => {
     const interval = setInterval(() => {
       if (!userRef.current) return;
-      const nowServer = Date.now() + serverClockOffsetRef.current;
+      const now = Date.now();
       const hasReadyPending = historyRef.current.some((h) => {
         if (h.gameId !== 'color-prediction' || h.status !== 'Pending' || !h.period) return false;
         const { roundEndTime } = parsePeriodToTimestamp(h.period, h.duration || 30);
-        return nowServer >= roundEndTime;
+        return now >= roundEndTime;
       });
       if (hasReadyPending) {
         settleWinGoBets();
@@ -464,33 +837,30 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => clearInterval(interval);
   }, [settleWinGoBets]);
 
-  // Sync account & rounds when window regains visibility or focus
-  useEffect(() => {
-    const handleSync = () => {
-      if (userRef.current) {
-        refreshAccountState();
-      }
-      refreshWinGoState();
-    };
-    window.addEventListener('visibilitychange', handleSync);
-    window.addEventListener('focus', handleSync);
-    return () => {
-      window.removeEventListener('visibilitychange', handleSync);
-      window.removeEventListener('focus', handleSync);
-    };
-  }, [refreshAccountState, refreshWinGoState]);
-
   const login = async (
     phoneNumber: string,
     password: string
   ): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.login({ phoneNumber, password });
-    if (!res.success || !res.state) {
-      return { success: false, error: res.error || 'Failed to sign in' };
+    const cleanPhone = normalizePhone(phoneNumber);
+    if (cleanPhone.length < 10) {
+      return { success: false, error: 'Please enter a valid 10-digit mobile number.' };
     }
-    setAuthToken(res.token || null);
-    applyAccountState(res.state);
-    refreshWinGoState();
+    if (!password || password.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters.' };
+    }
+
+    const accounts = readJson<Record<string, StoredAccount>>(STORAGE_KEY_ACCOUNTS, {});
+    const account = accounts[cleanPhone];
+    if (!account) {
+      return { success: false, error: 'No account found for this phone number. Please register first.' };
+    }
+    if (account.password !== password) {
+      return { success: false, error: 'Incorrect password. Please try again.' };
+    }
+
+    localStorage.setItem(STORAGE_KEY_AUTH_USER, cleanPhone);
+    applyStoredAccount(account);
+    await refreshWinGoState();
     playSound('win');
     return { success: true };
   };
@@ -501,13 +871,70 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     confirmPassword: string,
     inviteCode?: string
   ): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.register({ phoneNumber, password, confirmPassword, inviteCode });
-    if (!res.success || !res.state) {
-      return { success: false, error: res.error || 'Registration failed' };
+    const cleanPhone = normalizePhone(phoneNumber);
+    if (cleanPhone.length < 10) {
+      return { success: false, error: 'Please enter a valid 10-digit mobile number.' };
     }
-    setAuthToken(res.token || null);
-    applyAccountState(res.state);
-    refreshWinGoState();
+    if (!password || password.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters.' };
+    }
+    if (password !== confirmPassword) {
+      return { success: false, error: 'Passwords do not match.' };
+    }
+
+    const accounts = readJson<Record<string, StoredAccount>>(STORAGE_KEY_ACCOUNTS, {});
+    if (accounts[cleanPhone]) {
+      return { success: false, error: 'Phone number already registered. Please sign in.' };
+    }
+
+    const memberId = 'COB' + Math.floor(100000 + Math.random() * 900000);
+    const now = Date.now();
+
+    let referredBy: string | undefined;
+    const trimmedCode = (inviteCode || '').trim().toUpperCase();
+    if (trimmedCode) {
+      const referrerAcc = Object.values(accounts).find(
+        (a) => a.memberId.toUpperCase() === trimmedCode
+      );
+      if (referrerAcc) {
+        referredBy = referrerAcc.memberId;
+        const referrals = readJson<ReferralRecord[]>(STORAGE_KEY_REFERRALS, []);
+        referrals.unshift({
+          id: 'REF_' + now + '_' + Math.random().toString(36).slice(2, 6).toUpperCase(),
+          referrerMemberId: referrerAcc.memberId,
+          referrerPhone: referrerAcc.phoneNumber,
+          refereeMemberId: memberId,
+          refereePhone: cleanPhone,
+          registeredAt: now,
+          firstDepositCompleted: false,
+          rewardAmount: REFERRAL_REWARD_AMOUNT,
+        });
+        writeJson(STORAGE_KEY_REFERRALS, referrals);
+      }
+    }
+
+    const newAccount: StoredAccount = {
+      phoneNumber: cleanPhone,
+      password,
+      memberId,
+      registeredAt: now,
+      referredBy,
+      balance: INITIAL_BALANCE,
+      hasCompletedFirstDeposit: false,
+      dailyBonus: { ...defaultDailyBonus },
+      history: [],
+      savedBankDetails: null,
+      withdrawRecords: [],
+      depositRecords: [],
+    };
+
+    accounts[cleanPhone] = newAccount;
+    writeJson(STORAGE_KEY_ACCOUNTS, accounts);
+    localStorage.setItem(STORAGE_KEY_AUTH_USER, cleanPhone);
+
+    applyStoredAccount(newAccount);
+    await refreshWinGoState();
+    syncUserProfile(memberId, cleanPhone, INITIAL_BALANCE).catch(() => {});
     playSound('jackpot');
     return { success: true };
   };
@@ -515,9 +942,25 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sendPasswordResetOtp = async (
     phoneNumber: string
   ): Promise<{ success: boolean; message?: string; error?: string }> => {
-    const res = await api.sendOtp(phoneNumber);
-    if (res.success) playSound('tick');
-    return res;
+    const cleanPhone = normalizePhone(phoneNumber);
+    if (cleanPhone.length < 10) {
+      return { success: false, error: 'Please enter a valid 10-digit mobile number.' };
+    }
+    const accounts = readJson<Record<string, StoredAccount>>(STORAGE_KEY_ACCOUNTS, {});
+    if (!accounts[cleanPhone]) {
+      return { success: false, error: 'No registered account found for this phone number.' };
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    otpStoreRef.current[cleanPhone] = {
+      otp,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    };
+    playSound('tick');
+    return {
+      success: true,
+      message: `Your 6-digit verification OTP for +91 ${cleanPhone} is: ${otp}`,
+    };
   };
 
   const resetPasswordWithOtp = async (
@@ -526,20 +969,39 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     newPassword: string,
     confirmPassword: string
   ): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.resetPassword({ phoneNumber, otp, newPassword, confirmPassword });
-    if (res.success) playSound('win');
-    return res;
+    const cleanPhone = normalizePhone(phoneNumber);
+    const entry = otpStoreRef.current[cleanPhone];
+    if (!entry || entry.otp !== otp.trim()) {
+      return { success: false, error: 'Invalid verification OTP.' };
+    }
+    if (Date.now() > entry.expiresAt) {
+      return { success: false, error: 'OTP expired. Please request a new one.' };
+    }
+    if (newPassword.length < 6) {
+      return { success: false, error: 'New password must be at least 6 characters.' };
+    }
+    if (newPassword !== confirmPassword) {
+      return { success: false, error: 'Passwords do not match.' };
+    }
+
+    const accounts = readJson<Record<string, StoredAccount>>(STORAGE_KEY_ACCOUNTS, {});
+    if (!accounts[cleanPhone]) {
+      return { success: false, error: 'Account not found.' };
+    }
+    accounts[cleanPhone].password = newPassword;
+    writeJson(STORAGE_KEY_ACCOUNTS, accounts);
+    delete otpStoreRef.current[cleanPhone];
+    playSound('win');
+    return { success: true };
   };
 
   const logout = async () => {
     playSound('click');
+    localStorage.removeItem(STORAGE_KEY_AUTH_USER);
     try {
-      await api.logout();
+      sessionStorage.removeItem(STORAGE_KEY_ADMIN_SESSION);
     } catch {}
-    setAuthToken(null);
-    setAdminToken(null);
     setIsAdminUnlocked(false);
-    setMasterDepositRequests([]);
     setUser(null);
     userRef.current = null;
     setHistory([]);
@@ -547,6 +1009,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTotalBetsCount(0);
     setStats(defaultStats);
     setBalance(INITIAL_BALANCE);
+    balanceRef.current = INITIAL_BALANCE;
+    setHasCompletedFirstDeposit(false);
     setDailyBonus(defaultDailyBonus);
     setCanClaimDailyBonus(true);
     setTimeUntilNextBonus(0);
@@ -591,32 +1055,28 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (amount <= 0 || balanceRef.current < amount) {
       return false;
     }
-    const prevBal = balanceRef.current;
-    const optimistic = Number((prevBal - amount).toFixed(2));
-    setBalance(optimistic);
-    balanceRef.current = optimistic;
+    const nextBalance = Number((balanceRef.current - amount).toFixed(2));
+    balanceRef.current = nextBalance;
+    setBalance(nextBalance);
     playSound('bet');
 
-    api.placeInstantBet(amount).then((res) => {
-      if (res.success && typeof res.balance === 'number') {
-        setBalance(res.balance);
-        balanceRef.current = res.balance;
-      } else {
-        setBalance(prevBal);
-        balanceRef.current = prevBal;
-      }
-    });
+    const acc = persistCurrentAccount((curr) => ({ ...curr, balance: nextBalance }));
+    if (acc) {
+      updateWalletBalanceInSupabase(acc.memberId, acc.phoneNumber, nextBalance).catch(() => {});
+    }
     return true;
   };
 
   const refundBet = (amount: number) => {
     if (amount <= 0) return;
-    api.refundInstantBet(amount).then((res) => {
-      if (res.success && typeof res.balance === 'number') {
-        setBalance(res.balance);
-        balanceRef.current = res.balance;
-      }
-    });
+    const nextBalance = Number((balanceRef.current + amount).toFixed(2));
+    balanceRef.current = nextBalance;
+    setBalance(nextBalance);
+
+    const acc = persistCurrentAccount((curr) => ({ ...curr, balance: nextBalance }));
+    if (acc) {
+      updateWalletBalanceInSupabase(acc.memberId, acc.phoneNumber, nextBalance).catch(() => {});
+    }
   };
 
   const recordGameResult = async (item: Omit<GameHistoryItem, 'id' | 'timestamp'>) => {
@@ -627,29 +1087,39 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       playSound('loss');
     }
 
-    const res = await api.recordInstantBet({
-      gameId: item.gameId,
-      gameTitle: item.gameTitle,
-      betAmount: item.betAmount,
-      choice: item.choice,
-      outcome: item.outcome,
-      payout: item.payout,
-      commission: item.commission,
-      isWin: item.isWin,
-    });
+    const now = Date.now();
+    const record: GameHistoryItem = {
+      ...item,
+      id: 'BET_' + now + '_' + Math.random().toString(36).slice(2, 7).toUpperCase(),
+      timestamp: now,
+      status: 'Completed',
+      settledAt: now,
+    };
 
-    if (res.success && res.bet) {
-      setHistory((prev) => {
-        const updated = [res.bet!, ...prev.filter((p) => p.id !== res.bet!.id)];
-        historyRef.current = updated;
-        return updated;
-      });
-      if (typeof res.balance === 'number') {
-        setBalance(res.balance);
-        balanceRef.current = res.balance;
-      }
-      if (res.stats) setStats(res.stats);
-      setTotalBetsCount((c) => c + 1);
+    const nextBalance =
+      item.payout > 0
+        ? Number((balanceRef.current + item.payout).toFixed(2))
+        : balanceRef.current;
+
+    const nextHistory = [record, ...historyRef.current];
+    const nextStats = computeStats(nextHistory);
+
+    balanceRef.current = nextBalance;
+    setBalance(nextBalance);
+    historyRef.current = nextHistory;
+    setHistory(nextHistory);
+    setStats(nextStats);
+    setTotalBetsCount(nextHistory.filter((h) => h.status !== 'Pending').length);
+
+    const acc = persistCurrentAccount((curr) => ({
+      ...curr,
+      balance: nextBalance,
+      history: nextHistory,
+    }));
+
+    if (acc) {
+      recordBetInSupabase(record, acc.memberId, acc.phoneNumber).catch(() => {});
+      updateWalletBalanceInSupabase(acc.memberId, acc.phoneNumber, nextBalance).catch(() => {});
     }
   };
 
@@ -664,24 +1134,60 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, error: 'Deposit 1 time to play with bonus money' };
     }
 
-    const res = await api.placeWinGoBet(order);
-    if (!res.success || !res.bet) {
-      return { success: false, error: res.error || 'Failed to place bet in database' };
+    if (order.amount <= 0 || balanceRef.current < order.amount) {
+      return { success: false, error: 'Insufficient balance.' };
     }
 
+    const now = Date.now();
+    const rawTarget = String(order.target).toLowerCase();
+    const selectedOption =
+      order.selectedOption ||
+      (!isNaN(Number(order.target))
+        ? `Number ${order.target}`
+        : rawTarget === 'purple' || rawTarget === 'violet'
+        ? 'VIOLET'
+        : String(order.target).toUpperCase());
+
+    const bet: GameHistoryItem = {
+      id: 'WG_' + now + '_' + Math.random().toString(36).slice(2, 7).toUpperCase(),
+      gameId: 'color-prediction',
+      gameTitle: `Win Go ${order.duration >= 60 ? `${order.duration / 60}Min` : `${order.duration}s`}`,
+      betAmount: order.amount,
+      choice: `${selectedOption} [Issue ${order.period}]`,
+      outcome: 'Pending Resolution',
+      payout: 0,
+      netProfit: -order.amount,
+      isWin: false,
+      timestamp: now,
+      status: 'Pending',
+      period: order.period,
+      target: String(order.target),
+      multiplier: order.multiplier,
+      duration: order.duration,
+      selectedOption,
+    };
+
+    const nextBalance = Number((balanceRef.current - order.amount).toFixed(2));
+    const nextHistory = [bet, ...historyRef.current];
+
+    balanceRef.current = nextBalance;
+    setBalance(nextBalance);
+    historyRef.current = nextHistory;
+    setHistory(nextHistory);
     playSound('bet');
-    if (typeof res.balance === 'number') {
-      setBalance(res.balance);
-      balanceRef.current = res.balance;
-    }
-    setHistory((prev) => {
-      const updated = [res.bet!, ...prev.filter((p) => p.id !== res.bet!.id)];
-      historyRef.current = updated;
-      return updated;
-    });
-    setTotalBetsCount((c) => c + 1);
 
-    return { success: true, bet: res.bet, betId: res.bet.id };
+    const acc = persistCurrentAccount((curr) => ({
+      ...curr,
+      balance: nextBalance,
+      history: nextHistory,
+    }));
+
+    if (acc) {
+      recordBetInSupabase(bet, acc.memberId, acc.phoneNumber).catch(() => {});
+      updateWalletBalanceInSupabase(acc.memberId, acc.phoneNumber, nextBalance).catch(() => {});
+    }
+
+    return { success: true, bet, betId: bet.id };
   };
 
   const fetchPaginatedBets = useCallback(
@@ -692,11 +1198,39 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       outcome?: 'all' | 'wins' | 'losses';
       status?: 'all' | 'Completed' | 'Pending';
     }): Promise<PaginatedBetsResponse> => {
-      const res = await api.getBets(params);
-      if (res.success && res.stats) {
-        setStats(res.stats);
+      const page = Math.max(1, params.page || 1);
+      const limit = Math.max(1, params.limit || 10);
+
+      let filtered = [...historyRef.current];
+
+      if (params.status && params.status !== 'all') {
+        filtered = filtered.filter((b) =>
+          params.status === 'Pending' ? b.status === 'Pending' : b.status !== 'Pending'
+        );
       }
-      return res;
+      if (params.gameId && params.gameId !== 'all') {
+        filtered = filtered.filter((b) => b.gameId === params.gameId);
+      }
+      if (params.outcome === 'wins') {
+        filtered = filtered.filter((b) => b.isWin);
+      } else if (params.outcome === 'losses') {
+        filtered = filtered.filter((b) => !b.isWin);
+      }
+
+      const totalCount = filtered.length;
+      const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+      const start = (page - 1) * limit;
+      const items = filtered.slice(start, start + limit);
+
+      return {
+        success: true,
+        items,
+        totalCount,
+        page,
+        totalPages,
+        hasMore: page < totalPages,
+        stats: computeStats(historyRef.current),
+      };
     },
     []
   );
@@ -710,35 +1244,68 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (isClaimingRef.current) {
       return { success: false, amount: 0, day: dailyBonus.streak || 1, error: 'Processing claim...' };
     }
+    if (!userRef.current) {
+      return { success: false, amount: 0, day: 1, error: 'Please sign in first.' };
+    }
+
+    const now = Date.now();
+    if (dailyBonus.lastClaimedAt && now - dailyBonus.lastClaimedAt < BONUS_COOLDOWN_MS) {
+      return {
+        success: false,
+        amount: 0,
+        day: dailyBonus.streak || 1,
+        error: 'Daily bonus already claimed today. Come back later!',
+      };
+    }
+
     isClaimingRef.current = true;
     setIsClaimingDailyBonus(true);
-
     try {
-      const res = await api.claimDailyBonus();
-      if (res.dailyBonus) setDailyBonus(res.dailyBonus);
-      if (typeof res.canClaimDailyBonus === 'boolean') setCanClaimDailyBonus(res.canClaimDailyBonus);
-      if (typeof res.timeUntilNextBonus === 'number') setTimeUntilNextBonus(res.timeUntilNextBonus);
+      const nextDay = dailyBonus.streak >= 7 ? 1 : dailyBonus.streak + 1;
+      const tier = DAILY_BONUS_TIERS.find((t) => t.day === nextDay) || DAILY_BONUS_TIERS[0];
+      const amount = tier.points;
 
-      if (!res.success) {
-        return {
-          success: false,
-          amount: 0,
-          day: res.dailyBonus?.streak || dailyBonus.streak || 1,
-          error: res.error || 'Unable to claim daily bonus',
-        };
-      }
-
-      if (typeof res.newBalance === 'number') {
-        setBalance(res.newBalance);
-        balanceRef.current = res.newBalance;
-      }
-      playSound('jackpot');
-
-      return {
-        success: true,
-        amount: res.amount || 0,
-        day: res.day || 1,
+      const updatedBonus: DailyBonusState = {
+        lastClaimedAt: now,
+        streak: nextDay,
+        totalClaimed: dailyBonus.totalClaimed + amount,
+        history: [
+          {
+            id: 'DB_' + now,
+            day: nextDay,
+            amount,
+            claimedAt: now,
+          },
+          ...dailyBonus.history,
+        ],
       };
+
+      const nextBalance = Number((balanceRef.current + amount).toFixed(2));
+      balanceRef.current = nextBalance;
+      setBalance(nextBalance);
+      setDailyBonus(updatedBonus);
+      setCanClaimDailyBonus(false);
+      setTimeUntilNextBonus(BONUS_COOLDOWN_MS);
+
+      const acc = persistCurrentAccount((curr) => ({
+        ...curr,
+        balance: nextBalance,
+        dailyBonus: updatedBonus,
+      }));
+
+      if (acc) {
+        recordDailyBonusInSupabase(
+          acc.memberId,
+          acc.phoneNumber,
+          amount,
+          nextDay,
+          updatedBonus.totalClaimed,
+          nextBalance
+        ).catch(() => {});
+      }
+
+      playSound('jackpot');
+      return { success: true, amount, day: nextDay };
     } finally {
       isClaimingRef.current = false;
       setIsClaimingDailyBonus(false);
@@ -752,90 +1319,320 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     utr: string;
     screenshot?: string;
   }): Promise<{ success: boolean; record?: DepositRecord; error?: string }> => {
-    const res = await api.submitDeposit(data);
-    if (!res.success || !res.record) {
-      return { success: false, error: res.error || 'Failed to submit deposit' };
+    const currentUser = userRef.current;
+    if (!currentUser) {
+      return { success: false, error: 'Please log in to submit a deposit.' };
     }
-    setDepositRecords((prev) => [res.record!, ...prev]);
+
+    const now = Date.now();
+    const record: DepositRecord = {
+      id: 'DEP' + now.toString().slice(-8) + Math.floor(10 + Math.random() * 89),
+      memberId: currentUser.memberId,
+      phoneNumber: currentUser.phoneNumber,
+      amount: data.amount,
+      bonus: data.bonus,
+      totalCredit: data.amount + data.bonus,
+      method: data.method,
+      utr: data.utr,
+      screenshot: data.screenshot,
+      timestamp: now,
+      status: 'Pending',
+    };
+
+    const masterList = readJson<DepositRecord[]>(STORAGE_KEY_MASTER_DEPOSITS, []);
+    const nextMaster = [record, ...masterList];
+    writeJson(STORAGE_KEY_MASTER_DEPOSITS, nextMaster);
+    setMasterDepositRequests(nextMaster);
+
+    const nextUserDeposits = [record, ...depositRecords];
+    setDepositRecords(nextUserDeposits);
+    persistCurrentAccount((curr) => ({
+      ...curr,
+      depositRecords: [record, ...(curr.depositRecords || [])],
+    }));
+
+    recordDepositInSupabase(record).catch(() => {});
     playSound('click');
-    return { success: true, record: res.record };
+    return { success: true, record };
   };
 
   const refreshMasterDeposits = useCallback(async () => {
-    if (!hasAdminToken()) return;
-    const res = await api.getAdminDeposits();
-    if (res.success && res.deposits) {
-      setMasterDepositRequests(res.deposits);
-    }
+    const localList = readJson<DepositRecord[]>(STORAGE_KEY_MASTER_DEPOSITS, []);
+    try {
+      const remoteList = await fetchAllDepositsFromSupabase();
+      if (remoteList && remoteList.length > 0) {
+        const merged = new Map<string, DepositRecord>();
+        localList.forEach((d) => merged.set(d.id, d));
+        remoteList.forEach((rd) => {
+          const existing = merged.get(rd.id);
+          if (!existing || (existing.status === 'Pending' && rd.status !== 'Pending')) {
+            merged.set(rd.id, rd);
+          }
+        });
+        const sorted = Array.from(merged.values()).sort((a, b) => b.timestamp - a.timestamp);
+        writeJson(STORAGE_KEY_MASTER_DEPOSITS, sorted);
+        setMasterDepositRequests(sorted);
+        return;
+      }
+    } catch {}
+    setMasterDepositRequests(localList);
   }, []);
 
   const unlockAdmin = async (passcode: string): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.unlockAdmin(passcode);
-    if (!res.success || !res.adminToken) {
-      return { success: false, error: res.error || 'Access denied. Incorrect password.' };
+    if (passcode.trim() !== ADMIN_PASSCODE) {
+      return { success: false, error: 'Access denied. Incorrect password.' };
     }
-    setAdminToken(res.adminToken);
+    try {
+      sessionStorage.setItem(STORAGE_KEY_ADMIN_SESSION, 'true');
+    } catch {}
     setIsAdminUnlocked(true);
     await refreshMasterDeposits();
     return { success: true };
   };
 
   const exitAdmin = () => {
-    setAdminToken(null);
+    try {
+      sessionStorage.removeItem(STORAGE_KEY_ADMIN_SESSION);
+    } catch {}
     setIsAdminUnlocked(false);
-    setMasterDepositRequests([]);
   };
 
   const approveDepositRequest = async (
     depositId: string
   ): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.approveDeposit(depositId);
-    if (res.success) {
-      await Promise.all([refreshMasterDeposits(), refreshAccountState()]);
+    const masterList = readJson<DepositRecord[]>(STORAGE_KEY_MASTER_DEPOSITS, []);
+    const idx = masterList.findIndex((d) => d.id === depositId);
+    if (idx === -1) {
+      return { success: false, error: 'Deposit record not found.' };
     }
-    return res;
+    const targetDeposit = masterList[idx];
+    if (targetDeposit.status === 'Completed') {
+      return { success: false, error: 'Deposit already approved.' };
+    }
+
+    const now = Date.now();
+    const updatedDeposit: DepositRecord = {
+      ...targetDeposit,
+      status: 'Completed',
+      approvedAt: now,
+    };
+    masterList[idx] = updatedDeposit;
+    writeJson(STORAGE_KEY_MASTER_DEPOSITS, masterList);
+    setMasterDepositRequests([...masterList]);
+
+    updateDepositStatusInSupabase(depositId, 'Completed').catch(() => {});
+
+    // Credit player account & process referral rewards on first deposit
+    const accounts = readJson<Record<string, StoredAccount>>(STORAGE_KEY_ACCOUNTS, {});
+    const playerKey = Object.keys(accounts).find(
+      (k) =>
+        accounts[k].memberId === targetDeposit.memberId ||
+        accounts[k].phoneNumber === targetDeposit.phoneNumber
+    );
+
+    if (playerKey) {
+      const playerAcc = accounts[playerKey];
+      const wasFirstDepositPending = !playerAcc.hasCompletedFirstDeposit;
+      playerAcc.balance = Number((playerAcc.balance + targetDeposit.totalCredit).toFixed(2));
+      playerAcc.hasCompletedFirstDeposit = true;
+      playerAcc.depositRecords = (playerAcc.depositRecords || []).map((d) =>
+        d.id === depositId ? updatedDeposit : d
+      );
+      accounts[playerKey] = playerAcc;
+
+      updateWalletBalanceInSupabase(
+        playerAcc.memberId,
+        playerAcc.phoneNumber,
+        playerAcc.balance
+      ).catch(() => {});
+
+      // Refer & Earn: ₹77 for 1st deposit + ₹355 every 5 qualified referrals
+      if (wasFirstDepositPending && playerAcc.referredBy) {
+        const referrals = readJson<ReferralRecord[]>(STORAGE_KEY_REFERRALS, []);
+        const refIdx = referrals.findIndex(
+          (r) =>
+            r.referrerMemberId === playerAcc.referredBy &&
+            r.refereeMemberId === playerAcc.memberId &&
+            !r.firstDepositCompleted
+        );
+
+        let referrerKey = Object.keys(accounts).find(
+          (k) => accounts[k].memberId === playerAcc.referredBy
+        );
+
+        if (refIdx !== -1) {
+          referrals[refIdx] = {
+            ...referrals[refIdx],
+            firstDepositCompleted: true,
+            firstDepositAt: now,
+          };
+          writeJson(STORAGE_KEY_REFERRALS, referrals);
+        } else if (referrerKey) {
+          referrals.unshift({
+            id: 'REF_' + now,
+            referrerMemberId: accounts[referrerKey].memberId,
+            referrerPhone: accounts[referrerKey].phoneNumber,
+            refereeMemberId: playerAcc.memberId,
+            refereePhone: playerAcc.phoneNumber,
+            registeredAt: playerAcc.registeredAt,
+            firstDepositCompleted: true,
+            firstDepositAt: now,
+            rewardAmount: REFERRAL_REWARD_AMOUNT,
+          });
+          writeJson(STORAGE_KEY_REFERRALS, referrals);
+        }
+
+        if (referrerKey) {
+          const referrerAcc = accounts[referrerKey];
+          let bonusCredit = REFERRAL_REWARD_AMOUNT;
+
+          const qualifiedCount = referrals.filter(
+            (r) => r.referrerMemberId === referrerAcc.memberId && r.firstDepositCompleted
+          ).length;
+
+          if (qualifiedCount > 0 && qualifiedCount % REFERRAL_MILESTONE_TARGET === 0) {
+            const bonuses = readJson<ReferralMilestoneBonus[]>(STORAGE_KEY_REFERRAL_BONUSES, []);
+            const alreadyAwarded = bonuses.some(
+              (b) =>
+                b.referrerMemberId === referrerAcc.memberId && b.milestoneCount === qualifiedCount
+            );
+            if (!alreadyAwarded) {
+              bonuses.unshift({
+                id: 'REFM_' + now,
+                referrerMemberId: referrerAcc.memberId,
+                referrerPhone: referrerAcc.phoneNumber,
+                milestoneCount: qualifiedCount,
+                amount: REFERRAL_MILESTONE_BONUS,
+                awardedAt: now,
+              });
+              writeJson(STORAGE_KEY_REFERRAL_BONUSES, bonuses);
+              bonusCredit += REFERRAL_MILESTONE_BONUS;
+            }
+          }
+
+          referrerAcc.balance = Number((referrerAcc.balance + bonusCredit).toFixed(2));
+          accounts[referrerKey] = referrerAcc;
+          updateWalletBalanceInSupabase(
+            referrerAcc.memberId,
+            referrerAcc.phoneNumber,
+            referrerAcc.balance
+          ).catch(() => {});
+        }
+      }
+
+      writeJson(STORAGE_KEY_ACCOUNTS, accounts);
+    }
+
+    await refreshAccountState();
+    return { success: true };
   };
 
   const rejectDepositRequest = async (
     depositId: string,
     reason?: string
   ): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.rejectDeposit(depositId, reason);
-    if (res.success) {
-      playSound('loss');
-      await Promise.all([refreshMasterDeposits(), refreshAccountState()]);
+    const masterList = readJson<DepositRecord[]>(STORAGE_KEY_MASTER_DEPOSITS, []);
+    const idx = masterList.findIndex((d) => d.id === depositId);
+    if (idx === -1) {
+      return { success: false, error: 'Deposit record not found.' };
     }
-    return res;
+    const targetDeposit = masterList[idx];
+    const updatedDeposit: DepositRecord = {
+      ...targetDeposit,
+      status: 'Rejected',
+      rejectedReason: reason || 'Rejected by administrator',
+    };
+    masterList[idx] = updatedDeposit;
+    writeJson(STORAGE_KEY_MASTER_DEPOSITS, masterList);
+    setMasterDepositRequests([...masterList]);
+
+    updateDepositStatusInSupabase(depositId, 'Rejected', updatedDeposit.rejectedReason).catch(
+      () => {}
+    );
+
+    const accounts = readJson<Record<string, StoredAccount>>(STORAGE_KEY_ACCOUNTS, {});
+    const playerKey = Object.keys(accounts).find(
+      (k) =>
+        accounts[k].memberId === targetDeposit.memberId ||
+        accounts[k].phoneNumber === targetDeposit.phoneNumber
+    );
+    if (playerKey) {
+      accounts[playerKey].depositRecords = (accounts[playerKey].depositRecords || []).map((d) =>
+        d.id === depositId ? updatedDeposit : d
+      );
+      writeJson(STORAGE_KEY_ACCOUNTS, accounts);
+    }
+
+    playSound('loss');
+    await refreshAccountState();
+    return { success: true };
   };
 
   const saveBankDetails = async (
     details: BankAccountDetails
   ): Promise<{ success: boolean; error?: string }> => {
-    const res = await api.saveBankDetails(details);
-    if (res.success && res.details) {
-      setSavedBankDetails(res.details);
-      playSound('click');
-      return { success: true };
+    if (!details.accountHolderName || !details.accountNumber || !details.ifscCode) {
+      return { success: false, error: 'Please complete all required bank details.' };
     }
-    return { success: false, error: res.error || 'Failed to save bank details' };
+    setSavedBankDetails(details);
+    const acc = persistCurrentAccount((curr) => ({ ...curr, savedBankDetails: details }));
+    if (acc) {
+      saveBankDetailsToSupabase(details, acc.memberId, acc.phoneNumber).catch(() => {});
+    }
+    playSound('click');
+    return { success: true };
   };
 
   const submitWithdrawal = async (
     amount: number,
     details: BankAccountDetails
   ): Promise<{ success: boolean; error?: string; record?: WithdrawRecord }> => {
-    const res = await api.submitWithdrawal(amount, details);
-    if (!res.success || !res.record) {
-      return { success: false, error: res.error || 'Failed to submit withdrawal' };
+    if (amount < 100) {
+      return { success: false, error: 'Minimum withdrawal amount is ₹100.' };
     }
-    if (typeof res.balance === 'number') {
-      setBalance(res.balance);
-      balanceRef.current = res.balance;
+    if (balanceRef.current < amount) {
+      return { success: false, error: 'Insufficient balance.' };
     }
+
+    const now = Date.now();
+    const maskedAcc =
+      details.accountNumber.length > 4
+        ? `****${details.accountNumber.slice(-4)}`
+        : details.accountNumber;
+
+    const record: WithdrawRecord = {
+      id: 'WD' + now.toString().slice(-8) + Math.floor(10 + Math.random() * 89),
+      amount,
+      actualAmount: amount,
+      fee: 0,
+      bankName: details.bankName,
+      accountNumberMasked: maskedAcc,
+      accountHolderName: details.accountHolderName,
+      timestamp: now,
+      status: 'Processing',
+    };
+
+    const nextBalance = Number((balanceRef.current - amount).toFixed(2));
+    balanceRef.current = nextBalance;
+    setBalance(nextBalance);
     setSavedBankDetails(details);
-    setWithdrawRecords((prev) => [res.record!, ...prev]);
+    setWithdrawRecords((prev) => [record, ...prev]);
+
+    const acc = persistCurrentAccount((curr) => ({
+      ...curr,
+      balance: nextBalance,
+      savedBankDetails: details,
+      withdrawRecords: [record, ...(curr.withdrawRecords || [])],
+    }));
+
+    if (acc) {
+      recordWithdrawalInSupabase(record, acc.memberId, acc.phoneNumber).catch(() => {});
+      updateWalletBalanceInSupabase(acc.memberId, acc.phoneNumber, nextBalance).catch(() => {});
+      saveBankDetailsToSupabase(details, acc.memberId, acc.phoneNumber).catch(() => {});
+    }
+
     playSound('jackpot');
-    return { success: true, record: res.record };
+    return { success: true, record };
   };
 
   const referralStats: ReferralStats = useMemo(() => {

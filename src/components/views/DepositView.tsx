@@ -3,7 +3,6 @@ import {
   Wallet,
   Zap,
   CheckCircle,
-  Copy,
   QrCode,
   ShieldCheck,
   Building,
@@ -35,7 +34,6 @@ export const DepositView: React.FC = () => {
   const [selectedMethod, setSelectedMethod] = useState<'upi' | 'paytm' | 'bank' | 'usdt'>('upi');
   const [selectedAmount, setSelectedAmount] = useState<number>(1000);
   const [customAmount, setCustomAmount] = useState<string>('1000');
-  const [copiedUpi, setCopiedUpi] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   // UTR & Screenshot State (Step: Submit UTR and Submit SS)
@@ -92,26 +90,6 @@ export const DepositView: React.FC = () => {
     setSelectedAmount(parseInt(val, 10) || 0);
   };
 
-  const OFFICIAL_UPI_ID = '7841812365@nyes';
-
-  const handleCopyUpi = () => {
-    playSound('click');
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(OFFICIAL_UPI_ID).catch(() => {});
-    } else {
-      const textarea = document.createElement('textarea');
-      textarea.value = OFFICIAL_UPI_ID;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-    }
-    setCopiedUpi(true);
-    setTimeout(() => setCopiedUpi(false), 2000);
-  };
-
   // Screenshot file reader
   const handleScreenshotChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -154,26 +132,33 @@ export const DepositView: React.FC = () => {
     playSound('click');
     setIsProcessing(true);
 
-    setTimeout(() => {
-      const record = submitDepositRequest({
-        amount: currentAmountNum,
-        bonus: bonusAmount,
-        method: selectedMethod.toUpperCase(),
-        utr: cleanUtr,
-        screenshot: screenshotData || undefined,
-      });
+    setTimeout(async () => {
+      try {
+        const res = await submitDepositRequest({
+          amount: currentAmountNum,
+          bonus: bonusAmount,
+          method: selectedMethod.toUpperCase(),
+          utr: cleanUtr,
+          screenshot: screenshotData || undefined,
+        });
 
-      setIsProcessing(false);
-      setSubmittedModal({
-        isOpen: true,
-        record,
-      });
-
-      // Clear input fields
-      setUtrInput('');
-      setScreenshotData('');
-      setScreenshotFileName('');
-    }, 700);
+        setIsProcessing(false);
+        if (res.success && res.record) {
+          setSubmittedModal({
+            isOpen: true,
+            record: res.record,
+          });
+          setUtrInput('');
+          setScreenshotData('');
+          setScreenshotFileName('');
+        } else {
+          setFormError(res.error || 'Failed to submit deposit request.');
+        }
+      } catch {
+        setIsProcessing(false);
+        setFormError('Failed to submit deposit request.');
+      }
+    }, 500);
   };
 
   return (
@@ -330,18 +315,18 @@ export const DepositView: React.FC = () => {
             </div>
           </div>
 
-          {/* Official Merchant Payment UPI & QR Box */}
+          {/* Official Merchant Payment QR Box */}
           <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <label className="text-xs font-extrabold text-slate-700 uppercase tracking-wider block">
-                Official Merchant Payment UPI &amp; QR
+                Official Merchant Payment QR
               </label>
               <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                 Live &amp; Verified
               </span>
             </div>
 
-            {/* Scannable UPI QR Code */}
+            {/* Scannable Payment QR Code */}
             <div className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 border border-slate-200">
               <div
                 onClick={() => setLightboxImage('/assets/aistudio/cobclub_qr_1___1__b0202cf8.png')}
@@ -350,46 +335,13 @@ export const DepositView: React.FC = () => {
               >
                 <img
                   src="/assets/aistudio/cobclub_qr_1___1__b0202cf8.png"
-                  alt="COBCLUB Official UPI QR Code - 7841812365@nyes"
+                  alt="COBCLUB Official Payment QR Code"
                   className="w-full h-auto rounded-xl object-contain"
                 />
               </div>
               <span className="text-[11px] text-slate-500 font-medium mt-2.5 text-center">
                 Scan QR with PhonePe, Google Pay, Paytm or any UPI App (Tap QR to enlarge)
               </span>
-            </div>
-
-            {/* Copyable UPI ID */}
-            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center font-black text-xs shadow-xs shrink-0">
-                  UPI
-                </div>
-                <div>
-                  <span className="text-[11px] text-slate-400 block font-medium">Merchant UPI VPA</span>
-                  <span className="text-sm sm:text-base font-bold font-mono text-slate-900 select-all">
-                    {OFFICIAL_UPI_ID}
-                  </span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleCopyUpi}
-                className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 text-xs font-bold transition-all shadow-xs cursor-pointer"
-              >
-                {copiedUpi ? (
-                  <>
-                    <CheckCircle className="w-4 h-4 text-emerald-600" />
-                    <span className="text-emerald-700 font-black">UPI Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-4 h-4 text-slate-500" />
-                    <span>Copy UPI ID</span>
-                  </>
-                )}
-              </button>
             </div>
           </div>
 

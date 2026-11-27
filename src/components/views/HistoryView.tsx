@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { GameHistoryItem } from '../../types';
-import { BetDetailModal } from '../common/BetDetailModal';
 
 const MAIN_LIMIT = 10;
 const FULL_PAGE_LIMIT = 20;
@@ -34,7 +33,6 @@ export const HistoryView: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selectedBet, setSelectedBet] = useState<GameHistoryItem | null>(null);
 
   const loadBets = useCallback(
     async (pageToLoad: number, append: boolean, viewAll: boolean, outcomeFilter: 'all' | 'wins' | 'losses') => {
@@ -48,14 +46,14 @@ export const HistoryView: React.FC = () => {
           page: pageToLoad,
           limit,
           outcome: outcomeFilter,
-          status: 'all',
+          status: 'Completed',
         });
 
         if (res.success) {
           setItems((prev) => {
             if (!append) return res.items;
-            const seen = new Set(prev.map((x) => x.id));
-            return [...prev, ...res.items.filter((x) => !seen.has(x.id))];
+            const seen = new Set(prev.map((x: GameHistoryItem) => x.id));
+            return [...prev, ...res.items.filter((x: GameHistoryItem) => !seen.has(x.id))];
           });
           setFilteredTotalCount(res.totalCount);
           setTotalPages(res.totalPages);
@@ -273,111 +271,62 @@ export const HistoryView: React.FC = () => {
           <div className="py-16 text-center rounded-3xl bg-white border border-slate-200 shadow-xs text-xs text-slate-500 font-semibold">
             Loading bet history...
           </div>
-        ) : items.length > 0 ? (
+        ) : items.filter((item) => item.status !== 'Pending').length > 0 ? (
           <div className="space-y-2.5">
-            {items.map((item) => {
-              const isPending = item.status === 'Pending';
-              const betTargetLabel =
-                item.selectedOption ||
-                (item.target
-                  ? !isNaN(Number(item.target))
-                    ? `Number ${item.target}`
-                    : item.target.toUpperCase()
-                  : item.choice.replace(/\s*\[Issue\s+.*?\]/g, '').trim());
+            {items
+              .filter((item) => item.status !== 'Pending')
+              .map((item) => {
+                const betTargetLabel =
+                  item.selectedOption ||
+                  (item.target
+                    ? !isNaN(Number(item.target))
+                      ? `Number ${item.target}`
+                      : item.target.toUpperCase()
+                    : item.choice.replace(/\s*\[Issue\s+.*?\]/g, '').trim());
 
-              const dt = new Date(item.timestamp);
-              const dateStr = dt.toLocaleDateString([], {
-                day: '2-digit',
-                month: 'short',
-                year: 'numeric',
-              });
-              const timeStr = dt.toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-              });
-
-              return (
-                <div
-                  key={item.id}
-                  onClick={() => setSelectedBet(item)}
-                  className={`p-3.5 sm:p-4 rounded-2xl border cursor-pointer transition-all hover:shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
-                    isPending
-                      ? 'bg-amber-50/80 border-amber-300'
-                      : item.isWin
+                return (
+                  <div
+                    key={item.id}
+                    className={`p-3 sm:p-3.5 rounded-2xl border flex items-center justify-between gap-2 select-none ${
+                      item.isWin
                         ? 'bg-emerald-50/90 border-emerald-300'
                         : 'bg-red-50/90 border-red-300'
-                  }`}
-                >
-                  <div className="space-y-1.5 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
                       <span
-                        className={`px-3 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider shadow-xs shrink-0 ${
-                          isPending
-                            ? 'bg-amber-500 text-slate-950'
-                            : item.isWin
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-red-600 text-white'
+                        className={`px-3.5 py-1 rounded-full text-xs font-black uppercase tracking-wider shadow-xs shrink-0 ${
+                          item.isWin ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
                         }`}
                       >
-                        {isPending ? 'PENDING' : item.isWin ? 'WIN' : 'LOSS'}
+                        {item.isWin ? 'WIN' : 'LOSS'}
                       </span>
 
-                      <span className="px-2.5 py-0.5 rounded-lg text-xs font-black uppercase tracking-wide border bg-white text-slate-800 border-slate-200 truncate">
-                        Bet: {betTargetLabel}
-                      </span>
-
-                      <span className="text-[11px] font-bold text-slate-600">
-                        {item.gameTitle}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
-                      <span className="font-mono font-bold text-slate-700">
-                        ID: {item.id}
-                      </span>
-                      {item.period && (
-                        <span className="font-mono text-slate-500">
-                          Period: #{item.period}
+                      {betTargetLabel && (
+                        <span
+                          className={`px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wide border truncate ${
+                            item.isWin
+                              ? 'bg-white text-emerald-800 border-emerald-200'
+                              : 'bg-white text-red-700 border-red-200'
+                          }`}
+                        >
+                          Bet: {betTargetLabel}
                         </span>
                       )}
-                      <span>
-                        Result:{' '}
-                        <strong className="text-slate-800">
-                          {isPending
-                            ? 'Waiting Draw'
-                            : item.outcome || (item.resultNumber !== undefined ? `Number ${item.resultNumber}` : 'Settled')}
-                        </strong>
-                      </span>
-                      <span className="text-slate-500">
-                        {dateStr} · {timeStr}
-                      </span>
                     </div>
-                  </div>
 
-                  <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-slate-200/70">
                     <span
-                      className={`font-mono font-black text-sm sm:text-base tabular-nums ${
-                        isPending
-                          ? 'text-amber-700'
-                          : item.isWin
-                            ? 'text-emerald-700'
-                            : 'text-red-600'
+                      className={`font-mono font-black text-sm tabular-nums shrink-0 ${
+                        item.isWin ? 'text-emerald-700' : 'text-red-600'
                       }`}
                     >
-                      {isPending
-                        ? `₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`
-                        : item.isWin
-                          ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
-                          : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
-                    </span>
-                    <span className="text-[10px] font-mono font-bold text-slate-500">
-                      Wager: ₹{Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}
+                      {item.isWin
+                        ? `+₹${Number(item.payout || 0).toFixed(2).replace(/\.00$/, '')}`
+                        : `-₹${Number(item.betAmount || 0).toFixed(2).replace(/\.00$/, '')}`}
                     </span>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
 
             {/* VIEW ALL CTA in Latest-10 Mode */}
             {!showAllMode && filteredTotalCount > MAIN_LIMIT && (
@@ -449,8 +398,6 @@ export const HistoryView: React.FC = () => {
           </div>
         )}
       </div>
-
-      <BetDetailModal item={selectedBet} onClose={() => setSelectedBet(null)} />
     </div>
   );
 };
